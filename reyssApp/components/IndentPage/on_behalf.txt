@@ -1,0 +1,16 @@
+//INSERT INTO orders (customer_id, total_amount, order_type, placed_on, created_at, updated_at)
+VALUES (123, 0.0, 'AM', NOW(), NOW(), NOW());
+
+SET @new_order_id = LAST_INSERT_ID();
+
+INSERT INTO order_products (order_id, product_id, quantity, price, name, category)
+SELECT @new_order_id, product_id, quantity, price, name, category
+FROM order_products
+WHERE order_id = 456;
+
+UPDATE orders 
+SET total_amount = (
+    SELECT SUM(quantity * price) FROM order_products WHERE order_id = @new_order_id
+) 
+WHERE id = @new_order_id;
+/ *}

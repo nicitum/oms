@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+    <title>Test POST to Return URL</title>
+</head>
+<body>
+    <h1>Test POST to /payment-response</h1>
+    <form id="testForm" action="http://localhost:8090/payment-response" method="post">
+        <input type="hidden" name="testParam1" value="testValue1">
+        <input type="hidden" name="testParam2" value="testValue2">
+        <button type="submit">Submit Test POST</button>
+    </form>
+
+    <script>
+        document.getElementById('testForm').addEventListener('submit', function() {
+            console.log('Form submitted to /payment-response'); // For client-side confirmation
+        });
+    </script>
+</body>
+</html>

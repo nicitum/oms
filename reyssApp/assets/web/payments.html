@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Checkout Demo</title>
+    <meta name="viewport" content="user-scalable=no, width=device-width, initial-scale=1" />
+    <script src="https://www.paynimo.com/paynimocheckout/client/lib/jquery.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.js"></script>
+</head>
+
+<body>
+    <h1>Payment Page</h1>
+    <p>Loading payment gateway...</p>
+    <script type="text/javascript" src="https://www.paynimo.com/paynimocheckout/server/lib/checkout.js"></script>
+
+    <script type="text/javascript">
+        $(document).ready(function() {
+            function handleResponse(res) {
+                if (typeof res != "undefined" && typeof res.paymentMethod != "undefined" && typeof res.paymentMethod.paymentTransaction != "undefined" && typeof res.paymentMethod.paymentTransaction.statusCode != "undefined" && res.paymentMethod.paymentTransaction.statusCode == "0300") {
+                    // success block
+                    alert("Payment Success! (Status 0300). Check your app for transaction details.");
+                } else if (typeof res != "undefined" && typeof res.paymentMethod != "undefined" && typeof res.paymentMethod.paymentTransaction != "undefined" && typeof res.paymentMethod.paymentTransaction.statusCode != "undefined" && res.paymentMethod.paymentTransaction.statusCode == "0398") {
+                    // initiated block
+                    alert("Payment Initiated (Status 0398). Check your app for status updates.");
+                } else {
+                    // error block
+                    alert("Payment Error! (Status: " + res?.paymentMethod?.paymentTransaction?.statusCode + "). Check your app for details.");
+                }
+            };
+
+            // **Merchant Key - REPLACE with your ACTUAL Merchant Key!**
+            var merchantKey = "7685617431RBIUGE"; // **REPLACE THIS LINE** its a SALT given by wordline
+
+            // **Hash Calculation Function (SHA-512 - to match WEBSH2)**
+            function calculateHash(reqJson, merchantKey) {
+                const consumerData = reqJson.consumerData;
+                const items = consumerData.items[0];
+
+                const hashString = [
+                    consumerData.merchantId || "",
+                    consumerData.txnId || "",
+                    items.amount || "",
+                    consumerData.accountNo || "",
+                    consumerData.consumerId || "",
+                    consumerData.consumerMobileNo || "",
+                    consumerData.consumerEmailId || "",
+                    consumerData.debitStartDate || "",
+                    consumerData.debitEndDate || "",
+                    consumerData.maxAmount || "",
+                    consumerData.amountType || "",
+                    consumerData.frequency || "",
+                    consumerData.cardNumber || "",
+                    consumerData.expMonth || "",
+                    consumerData.expYear || "",
+                    consumerData.cvvCode || "",
+                    merchantKey
+                ].join("|");
+
+                console.log("String for Hashing:", hashString);
+                const calculatedHash = CryptoJS.SHA512(hashString).toString(CryptoJS.enc.Hex).toUpperCase();
+                console.log("Calculated Hash:", calculatedHash);
+                console.log('cosumerData', consumerData);
+                return calculatedHash;
+            }
+
+
+            // ** PAYMENT INITIATION LOGIC - NOW RUNS IMMEDIATELY ON PAGE LOAD **
+            // ** No button click needed anymore **
+
+            // **IMPORTANT: Get reqJson from URL parameter**
+            const urlParams = new URLSearchParams(window.location.search);
+            const reqJsonParam = urlParams.get('reqJson');
+
+            console.log("Raw reqJsonParam from URL:", reqJsonParam);
+
+            if (!reqJsonParam) {
+                console.error("Payment page error: Missing reqJsonParam in URL.");
+                alert("Payment page error: Missing payment configuration.");
+                return;
+            }
+
+            let reqJson;
+            try {
+                reqJson = JSON.parse(reqJsonParam);
+                console.log("Parsed reqJson object:", reqJson);
+            } catch (error) {
+                console.error("Error parsing reqJson from URL parameter:", error);
+                alert("Payment page error: Invalid payment configuration.");
+                return;
+            }
+
+            // ** 1. Calculate Hash (SHA-512) **
+            const hashValue = calculateHash(reqJson, merchantKey);
+
+            // ** 2. Add the calculated hash to the reqJson object **
+            reqJson.consumerData.token = hashValue;
+
+            console.log("Final reqJson with Hash:", reqJson);
+
+            $.pnCheckout(reqJson);
+
+            if (reqJson.features.enableNewWindowFlow) {
+                pnCheckoutShared.openNewWindow();
+            }
+            // ** END OF PAYMENT INITIATION LOGIC **
+
+
+        });
+    </script>
+</body>
+
+</html>

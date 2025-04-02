@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Reyss",
+    "slug": "reyss",
+    "scheme": "reyss-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/logo.png",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.reyss.reyssApp",
+      "permissions": ["android.permission.INTERNET"] 
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ec4e0a74-8569-4875-81c0-80f866ae582c"
+      }
+    },
+    "owner": "togiwo_1",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true, 
+            "permissions": ["android.permission.INTERNET"] 
+          }
+        }
+      ]
+    ]
+  }
+}
