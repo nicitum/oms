@@ -88,7 +88,8 @@ exports.getAllUsersController = async (req, res) => {
 
 exports.addProductController = async (req, res) => {
   try {
-    const { name, brand, category, price, discountPrice } = req.body;
+    const { name, brand, category, price, discountPrice, hsn_code, gst_rate } = req.body;
+   
 
     if (!name || !category || !price || !brand) {
       return res.status(400).json({
@@ -105,9 +106,12 @@ exports.addProductController = async (req, res) => {
       discountPrice: discountPrice || 0,
       created_at: Math.floor(Date.now() / 1000),
       updated_at: Math.floor(Date.now() / 1000),
+      hsn_code: hsn_code || "",
+      gst_rate: gst_rate || 0
     };
 
     const addResponse = await adminService.addProductService(productData);
+ 
 
     res.status(addResponse.statusCode).send(addResponse.response);
   } catch (error) {
@@ -139,7 +143,7 @@ exports.updateUserController = async (req, res) => {
 exports.updateProductController = async (req, res) => {
   try {
     const { id } = req.query; // Get product ID from URL params
-    const { name, brand, category, price, discountPrice, uom } = req.body;
+    const { name, brand, category, price, discountPrice, uom, hsn_code, gst_rate } = req.body;
 
     // Validate required fields
     if (!id || !name || !category || !price) {
@@ -154,6 +158,8 @@ exports.updateProductController = async (req, res) => {
       price,
       discountPrice: discountPrice || null,
       uom: uom || "pkts",
+      hsn_code: hsn_code || "",
+      gst_rate: gst_rate || 0,
     };
 
     // Call the service to update the product

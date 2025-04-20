@@ -169,27 +169,33 @@ router.post("/assign-users-to-admin", async (req, res) => {
 // display helper api for only admins users .
 // Endpoint to fetch users assigned to a specific admin
 router.get("/assigned-users/:adminId", async (req, res) => {
-  const { adminId } = req.params; // Get adminId from route parameter
+  const { adminId } = req.params;
 
-  // Validate the adminId
   if (!adminId) {
     return res.status(400).json({ success: false, message: "Admin ID is required." });
   }
 
   try {
-    // Fetch the users assigned to the given admin by joining the 'admin_assign' and 'users' tables
-    
     const fetchQuery = `
-    SELECT u.id, u.username, u.phone, u.customer_id AS cust_id, u.name, u.route, u.status,u.delivery_address
-    FROM users u
-    INNER JOIN admin_assign aa ON u.id = aa.customer_id
-    WHERE aa.admin_id = ?
-  `;
-  
-    // Execute the query
+      SELECT DISTINCT
+        u.id, 
+        u.username, 
+        u.phone, 
+        u.customer_id AS cust_id, 
+        u.name, 
+        u.route, 
+        u.status, 
+        u.delivery_address
+      FROM users u
+      INNER JOIN admin_assign aa 
+        ON (u.id = aa.customer_id OR u.customer_id = aa.customer_id)
+      WHERE aa.admin_id = ?
+    `;
+    
+    console.log("Fetching assigned users for adminId:", adminId);
     const assignedUsers = await executeQuery(fetchQuery, [adminId]);
+    console.log("Assigned users:", assignedUsers);
 
-    // Return the assigned users
     if (assignedUsers.length > 0) {
       return res.status(200).json({
         success: true,
@@ -202,8 +208,16 @@ router.get("/assigned-users/:adminId", async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("Error fetching assigned users:", error);
-    return res.status(500).json({ success: false, message: "Error fetching assigned users." });
+    console.error("Error fetching assigned users:", {
+      message: error.message,
+      stack: error.stack,
+      adminId
+    });
+    return res.status(500).json({ 
+      success: false, 
+      message: "Error fetching assigned users.", 
+      error: error.message 
+    });
   }
 });
 

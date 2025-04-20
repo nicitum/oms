@@ -4,7 +4,49 @@ const session = require('express-session');
 const { executeQuery } = require("../dbUtils/db");
 const fs = require('fs');
 const moment = require("moment-timezone"); 
-const path = require('path');
+const bcrypt = require('bcrypt');
+const path = require("path");
+
+
+
+async function updateExistingPasswords() {
+    try {
+        const users = await executeQuery("SELECT id, customer_id FROM users");
+
+        for (const user of users) {
+            const userId = user.id;
+            const customerId = user.customer_id.toString(); // Ensure it's a string
+
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(customerId, salt);
+
+            await executeQuery("UPDATE users SET password = ?, updated_at = UNIX_TIMESTAMP() WHERE id = ?", [hashedPassword, userId]);
+
+            console.log(`Updated password for user ID: ${userId}`);
+        }
+
+        console.log('Successfully updated passwords for all users.');
+        return { status: true, message: 'Successfully updated passwords for all users.' };
+    } catch (error) {
+        console.error('Error updating passwords:', error);
+        return { status: false, message: 'Error updating passwords.', error: error.message };
+    }
+}
+
+// API endpoint to trigger password update
+router.post("/update-all-passwords-to-customer-id", async (req, res) => {
+    try {
+        const result = await updateExistingPasswords();
+        if (result.status) {
+            return res.status(200).json({ message: result.message });
+        } else {
+            return res.status(500).json({ message: result.message, error: result.error });
+        }
+    } catch (error) {
+        console.error("Error in password update endpoint:", error);
+        return res.status(500).json({ message: "Internal server error during password update." });
+    }
+});
 
 // API to update order approved_status
 router.post("/update-order-status", async (req, res) => {
@@ -37,17 +79,6 @@ router.post("/update-order-status", async (req, res) => {
     }
 });
 
-router.get('/images/products/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const imagePath = path.join(__dirname, '..', 'uploads', 'products', filename);
-  
-    res.sendFile(imagePath, (err) => {
-      if (err) {
-        console.error('Error sending image:', err);
-        res.status(404).send('Image not found');
-      }
-    });
-  });
 
 
 
@@ -88,19 +119,64 @@ router.post("/update-delivery-status", async (req, res) => {
 router.get("/get-orders/:customer_id", async (req, res) => {
     try {
         const { customer_id } = req.params;
+        const { date } = req.query;
 
         if (!customer_id) {
             return res.status(400).json({ status: false, message: "Customer ID is required" });
         }
 
-        const fetchQuery = "SELECT id,total_amount,customer_id,delivery_status,approve_status,cancelled,placed_on,loading_slip FROM orders WHERE customer_id = ? ORDER BY id DESC";
-        const fetchResult = await executeQuery(fetchQuery, [customer_id]);
+        let fetchQuery = "SELECT id, total_amount, customer_id, delivery_status, approve_status, cancelled, placed_on, loading_slip, order_type FROM orders WHERE customer_id = ? ";
+        let queryParams = [customer_id];
 
-        if (fetchResult.length > 0) {
-            return res.json({ status: true, orders: fetchResult });
-        } else {
-            return res.json({ status: true, orders: [] });
+        if (date) {
+            // Validate date format (YYYY-MM-DD)
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return res.status(400).json({ status: false, message: "Invalid date format. Use YYYY-MM-DD" });
+            }
+
+            // Calculate start and end of the day in Unix timestamps
+            const startOfDay = moment(date).startOf('day').unix();
+            const endOfDay = moment(date).endOf('day').unix();
+
+            fetchQuery += "AND placed_on >= ? AND placed_on <= ? ";
+            queryParams.push(startOfDay, endOfDay);
         }
+
+        fetchQuery += "ORDER BY id DESC";
+        const fetchResult = await executeQuery(fetchQuery, queryParams);
+
+        return res.json({ status: true, orders: fetchResult });
+    } catch (error) {
+        console.error("Error fetching orders:", error);
+        res.status(500).json({ status: false, message: "Internal Server Error" });
+    }
+});
+
+router.get("/get-orders-sa/", async (req, res) => {
+    try {
+        const { date } = req.query;
+
+        let fetchQuery = "SELECT * FROM orders ORDER BY id DESC";
+        let queryParams = [];
+
+        if (date) {
+            // Validate date format (YYYY-MM-DD)
+            const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
+            if (!isValidDate) {
+                return res.status(400).json({ status: false, message: "Invalid date format. Use YYYY-MM-DD" });
+            }
+
+            // Convert date to Unix timestamp range for the given day
+            const startOfDay = Math.floor(new Date(date).setHours(0, 0, 0, 0) / 1000); // Start of day in seconds
+            const endOfDay = Math.floor(new Date(date).setHours(23, 59, 59, 999) / 1000); // End of day in seconds
+
+            fetchQuery = "SELECT * FROM orders WHERE placed_on >= ? AND placed_on <= ? ORDER BY id DESC";
+            queryParams = [startOfDay, endOfDay];
+        }
+
+        const fetchResult = await executeQuery(fetchQuery, queryParams);
+
+        return res.json({ status: true, orders: fetchResult });
     } catch (error) {
         console.error("Error fetching orders:", error);
         res.status(500).json({ status: false, message: "Internal Server Error" });
@@ -108,29 +184,43 @@ router.get("/get-orders/:customer_id", async (req, res) => {
 });
 
 
-
-
-// API to fetch orders for a specific admin with total indent amount
 router.get("/get-admin-orders/:admin_id", async (req, res) => {
     try {
         const { admin_id } = req.params;
+        const { date } = req.query;
 
         if (!admin_id) {
             return res.status(400).json({ success: false, message: "Admin ID is required" });
         }
 
-        // Updated SQL Query to fetch orders along with total indent amount
-        const query = `
+        // Base SQL Query to fetch orders along with total indent amount
+        let query = `
             SELECT o.*, 
                    SUM(op.price * op.quantity) AS amount 
             FROM orders o
             JOIN admin_assign a ON o.customer_id = a.cust_id
             LEFT JOIN order_products op ON o.id = op.order_id
             WHERE a.admin_id = ?
-            GROUP BY o.id;
         `;
+        let queryParams = [admin_id];
 
-        const orders = await executeQuery(query, [admin_id]);
+        if (date) {
+            // Validate date format (YYYY-MM-DD)
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return res.status(400).json({ success: false, message: "Invalid date format. Use YYYY-MM-DD" });
+            }
+
+            // Calculate start and end of the day in Unix timestamps
+            const startOfDay = moment(date).startOf('day').unix();
+            const endOfDay = moment(date).endOf('day').unix();
+
+            query += " AND o.placed_on >= ? AND o.placed_on <= ?";
+            queryParams.push(startOfDay, endOfDay);
+        }
+
+        query += " GROUP BY o.id ORDER BY o.id DESC";
+
+        const orders = await executeQuery(query, queryParams);
 
         res.json({ success: true, orders });
 
@@ -139,7 +229,6 @@ router.get("/get-admin-orders/:admin_id", async (req, res) => {
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 });
-
 
 
 
@@ -199,7 +288,8 @@ router.get("/order-products", async (req, res) => { // <-- GET request, path: /o
                 quantity,
                 price,
                 name,
-                category
+                category,
+                gst_rate
             FROM
                 order_products
             WHERE
@@ -218,7 +308,8 @@ router.get("/order-products", async (req, res) => { // <-- GET request, path: /o
                 quantity: row.quantity,
                 price: row.price,
                 name: row.name,
-                category: row.category
+                category: row.category,
+                gst_rate: row.gst_rate
             }));
             return res.status(200).json(productList);
         } else {
@@ -234,7 +325,6 @@ router.get("/order-products", async (req, res) => { // <-- GET request, path: /o
 
 
 
-// API to fetch the most recent order for a specific customer and order type
 router.get("/most-recent-order", async (req, res) => {
     try {
         const { customerId, orderType } = req.query;
@@ -247,35 +337,28 @@ router.get("/most-recent-order", async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid Order Type. Must be 'AM' or 'PM'" });
         }
 
-        // SQL Query to fetch the most recent order
-
-        
+        // Optimized query (no FROM_UNIXTIME, uses index)
         const query = `
-            SELECT *  
-            FROM orders  
-            WHERE customer_id = ?  
-            AND order_type = ?  
-            ORDER BY FROM_UNIXTIME(placed_on) DESC  
-            LIMIT 1;
-
+            SELECT *
+            FROM orders
+            WHERE customer_id = ?
+              AND order_type = ?
+            ORDER BY placed_on DESC
+            LIMIT 1
         `;
 
         const recentOrder = await executeQuery(query, [customerId, orderType]);
 
         if (recentOrder && recentOrder.length > 0) {
-            // Order found
-            res.json({ success: true, order: recentOrder[0] }); // Return the first (most recent) order
+            res.json({ success: true, order: recentOrder[0] });
         } else {
-            // No order found
             res.json({ success: true, order: null, message: "No previous orders found for this customer and order type" });
         }
-
     } catch (error) {
         console.error("Error fetching most recent order:", error);
         res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
     }
 });
-
 
 
 
@@ -304,9 +387,6 @@ router.delete("/delete_order_product/:orderProductId", async (req, res) => {
         res.status(500).json({ success: false, message: "Internal Server Error", error: error });
     }
 });
-
-
-// --- 2. POST /order_update (Modified with cancellation and altered status logic) ---
 router.post("/order_update", async (req, res) => {
     try {
         const { orderId, products, totalAmount } = req.body;
@@ -336,27 +416,29 @@ router.post("/order_update", async (req, res) => {
         // Update order products if there are any
         if (products.length > 0) {
             for (const product of products) {
-                const { order_id, quantity, price, is_new } = product;
+                const { order_id, quantity, price, gst_rate, is_new } = product;
                 if (!order_id) {
                     return res.status(400).json({ success: false, message: "order_product_id is required for product updates" });
                 }
 
-                // Get current quantity for existing products
+                // Get current quantity and gst_rate for existing products
                 let currentQuantity = 0;
+                let currentGstRate = null;
                 if (!is_new) {
-                    const currentProductQuery = `SELECT quantity FROM order_products WHERE order_id = ? AND product_id = ?`;
+                    const currentProductQuery = `SELECT quantity, gst_rate FROM order_products WHERE order_id = ? AND product_id = ?`;
                     const currentProduct = await executeQuery(currentProductQuery, [order_id, product.product_id]);
                     if (currentProduct.length > 0) {
                         currentQuantity = currentProduct[0].quantity;
+                        currentGstRate = currentProduct[0].gst_rate;
                     }
                 }
 
                 if (is_new) {
                     const insertProductQuery = `
-                        INSERT INTO order_products (order_id, product_id, quantity, price, name, category, altered)
-                        VALUES (?, ?, ?, ?, ?, ?, 'No')
+                        INSERT INTO order_products (order_id, product_id, quantity, price, name, category, gst_rate, altered)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'No')
                     `;
-                    await executeQuery(insertProductQuery, [orderId, product.product_id, quantity, price, product.name, product.category]);
+                    await executeQuery(insertProductQuery, [orderId, product.product_id, quantity, price, product.name, product.category, gst_rate]);
                 } else {
                     // Calculate the actual quantity difference
                     const quantityDifference = quantity - currentQuantity;
@@ -366,15 +448,17 @@ router.post("/order_update", async (req, res) => {
                         UPDATE order_products
                         SET quantity = ?, 
                             price = ?,
+                            gst_rate = ?,
                             altered = ?,
                             quantity_change = ?
                         WHERE order_id = ? AND product_id = ?
                     `;
                     
-                    let alteredStatus = currentQuantity !== quantity ? 'Yes' : 'No';
+                    let alteredStatus = currentQuantity !== quantity || currentGstRate !== gst_rate ? 'Yes' : 'No';
                     await executeQuery(updateProductQuery, [
                         quantity, 
                         price, 
+                        gst_rate,
                         alteredStatus,
                         quantityChange,
                         orderId, 
@@ -408,7 +492,33 @@ router.post("/order_update", async (req, res) => {
 });
 
 
+router.get("/latest-product-price", async (req, res) => {
+    try {
+        const { productId } = req.query;
 
+        if (!productId || isNaN(productId)) {
+            return res.status(400).json({ success: false, message: "Valid productId is required." });
+        }
+
+        const query = `
+            SELECT price 
+            FROM order_products 
+            WHERE product_id = ? 
+            ORDER BY id DESC 
+            LIMIT 1
+        `;
+        const result = await executeQuery(query, [productId]);
+
+        if (result.length === 0) {
+            return res.status(404).json({ success: false, message: "No price found for this product in order_products." });
+        }
+
+        res.json({ success: true, price: result[0].price });
+    } catch (error) {
+        console.error("Error fetching latest product price:", error);
+        res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
+    }
+});
 
 // --- 3. CANCEL Order (Endpoint to cancel the order - Modified from DELETE) ---
 router.post("/cancel_order/:orderId", async (req, res) => { // Changed to POST
@@ -455,11 +565,9 @@ router.post("/cancel_order/:orderId", async (req, res) => { // Changed to POST
     }
 });
 
-
-// --- 2. ADD Product to Order (New Endpoint) ---
 router.post("/add-product-to-order", async (req, res) => {
     try {
-        const { orderId, productId, quantity, price, name, category } = req.body;
+        const { orderId, productId, quantity, price, name, category, gst_rate } = req.body;
 
         // --- Input Validation ---
         if (!orderId || !productId || quantity === undefined || price === undefined) {
@@ -468,10 +576,13 @@ router.post("/add-product-to-order", async (req, res) => {
         if (isNaN(orderId) || isNaN(productId) || isNaN(quantity) || isNaN(price) || quantity <= 0 || price < 0) {
             return res.status(400).json({ success: false, message: "Invalid data types: orderId and productId must be numbers, quantity must be a positive number, and price must be a non-negative number." });
         }
+        if (gst_rate === undefined || isNaN(gst_rate) || gst_rate < 0) {
+            return res.status(400).json({ success: false, message: "Invalid GST rate: gst_rate must be a non-negative number." });
+        }
 
         // --- Check if Order and Product Exist ---
         const orderExistsQuery = `SELECT id FROM orders WHERE id = ?`;
-        const productExistsQuery = `SELECT id FROM products WHERE id = ?`;
+        const productExistsQuery = `SELECT id, gst_rate FROM products WHERE id = ?`;
 
         const orderExistsResult = await executeQuery(orderExistsQuery, [orderId]);
         if (orderExistsResult.length === 0) {
@@ -483,23 +594,27 @@ router.post("/add-product-to-order", async (req, res) => {
             return res.status(400).json({ success: false, message: `Product with ID ${productId} not found.` });
         }
 
+        // Use the GST rate from the products table if not provided in the request
+        const productGstRate = productExistsResult[0].gst_rate;
+        const finalGstRate = gst_rate !== undefined ? gst_rate : productGstRate;
+
         // --- Check if the product is already in the order ---
         const productAlreadyInOrderQuery = `SELECT quantity FROM order_products WHERE order_id = ? AND product_id = ?`;
         const productInOrderResult = await executeQuery(productAlreadyInOrderQuery, [orderId, productId]);
 
         if (productInOrderResult.length > 0) {
-            // Update quantity if different
+            // Update quantity, price, and gst_rate if different
             if (parseInt(productInOrderResult[0].quantity) !== parseInt(quantity)) {
                 const updateQuery = `
                     UPDATE order_products 
-                    SET quantity = ?, price = ?
+                    SET quantity = ?, price = ?, gst_rate = ?
                     WHERE order_id = ? AND product_id = ?
                 `;
-                await executeQuery(updateQuery, [quantity, price, orderId, productId]);
+                await executeQuery(updateQuery, [quantity, price, finalGstRate, orderId, productId]);
 
                 return res.json({
                     success: true,
-                    message: "Product quantity updated"
+                    message: "Product quantity and GST rate updated"
                 });
             } else {
                 return res.status(409).json({
@@ -511,13 +626,13 @@ router.post("/add-product-to-order", async (req, res) => {
 
         // --- Insert new order_product record ---
         const insertQuery = `
-            INSERT INTO order_products (order_id, product_id, quantity, price, name, category)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO order_products (order_id, product_id, quantity, price, name, category, gst_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
-        const insertResult = await executeQuery(insertQuery, [orderId, productId, quantity, price, name, category]);
+        const insertResult = await executeQuery(insertQuery, [orderId, productId, quantity, price, name, category, finalGstRate]);
 
         if (insertResult.affectedRows > 0) {
-            console.log(`Product ID ${productId} added to order ID ${orderId}`);
+            console.log(`Product ID ${productId} added to order ID ${orderId} with GST rate ${finalGstRate}`);
             res.status(201).json({
                 success: true,
                 message: "Product added to order successfully",
@@ -534,6 +649,7 @@ router.post("/add-product-to-order", async (req, res) => {
     }
 });
 
+
 router.post("/on-behalf", async (req, res) => {
     try {
         const { customer_id, order_type, reference_order_id } = req.body;
@@ -544,10 +660,91 @@ router.post("/on-behalf", async (req, res) => {
             });
         }
 
-        // 1. Place Admin Order and get new_order_id
+        // Validate order_type is exactly 'AM' or 'PM'
+        if (order_type !== 'AM' && order_type !== 'PM') {
+            return res.status(400).json({ message: "Invalid order_type. Must be 'AM' or 'PM'." });
+        }
+
+        // 0. Check if an order already exists for the customer and order_type today
+        const checkExistingOrderQuery = `
+            SELECT id
+            FROM orders
+            WHERE customer_id = ?
+            AND order_type = ?
+            AND DATE(FROM_UNIXTIME(placed_on)) = CURDATE()
+            LIMIT 1
+        `;
+        const existingOrderResult = await executeQuery(checkExistingOrderQuery, [customer_id, order_type]);
+
+        if (existingOrderResult && existingOrderResult.length > 0) {
+            return res.status(400).json({
+                message: `Order already placed for ${order_type} today.`
+            });
+        }
+
+        // 1. Check if auto order is enabled for the user and order type
+        const checkAutoOrderQuery = `
+            SELECT auto_am_order, auto_pm_order
+            FROM users
+            WHERE customer_id = ?
+        `;
+        const userCheckResult = await executeQuery(checkAutoOrderQuery, [customer_id]);
+
+        if (!userCheckResult || userCheckResult.length === 0) {
+            return res.status(404).json({ message: "Customer not found." });
+        }
+
+        const user = userCheckResult[0];
+
+        if (order_type === 'AM') {
+            if (user.auto_am_order && user.auto_am_order.toLowerCase() === 'yes') {
+                // Proceed
+            } else {
+                return res.status(400).json({ message: "Automatic AM order placement is disabled for this customer." });
+            }
+        } else if (order_type === 'PM') {
+            if (user.auto_pm_order && user.auto_pm_order.toLowerCase() === 'yes') {
+                // Proceed
+            } else {
+                return res.status(400).json({ message: "Automatic PM order placement is disabled for this customer." });
+            }
+        }
+
+        // 2. Validate reference_order_id exists and has products
+        const checkReferenceOrderQuery = `
+            SELECT id
+            FROM orders
+            WHERE id = ?
+        `;
+        const referenceOrderResult = await executeQuery(checkReferenceOrderQuery, [reference_order_id]);
+
+        if (!referenceOrderResult || referenceOrderResult.length === 0) {
+            return res.status(400).json({ message: `Reference order ID ${reference_order_id} does not exist.` });
+        }
+
+        const checkReferenceProductsQuery = `
+            SELECT product_id, quantity, price, name, category,gst_rate
+            FROM order_products
+            WHERE order_id = ?
+            AND LOWER(category) NOT LIKE '%others%'
+            AND LOWER(category) NOT LIKE '%paneer%'
+            AND LOWER(category) NOT LIKE '%ghee%'
+            AND LOWER(category) NOT LIKE '%butter%'
+            AND LOWER(category) NOT LIKE '%butter milk%'
+        `;
+        const referenceProducts = await executeQuery(checkReferenceProductsQuery, [reference_order_id]);
+        console.log(`Reference order ${reference_order_id} products for ${order_type}:`, referenceProducts);
+
+        if (!referenceProducts || referenceProducts.length === 0) {
+            return res.status(400).json({
+                message: `No eligible products found in reference order ${reference_order_id} for ${order_type} order.`
+            });
+        }
+
+        // 3. Place Admin Order and get new_order_id
         const insertOrderQuery = `
             INSERT INTO orders (customer_id, total_amount, order_type, placed_on, created_at, updated_at)
-            VALUES (?, 0.0, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), UNIX_TIMESTAMP());
+            VALUES (?, 0.0, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
         `;
         const orderValues = [customer_id, order_type];
         const insertOrderResult = await executeQuery(insertOrderQuery, orderValues);
@@ -557,26 +754,27 @@ router.post("/on-behalf", async (req, res) => {
             return res.status(500).json({ message: "Failed to create new order." });
         }
 
-        // 2. Insert Order Products from reference order
+        // 4. Insert Order Products from reference order
         const insertOrderProductsQuery = `
-        INSERT INTO order_products (order_id, product_id, quantity, price, name, category)
-        SELECT ?, product_id, quantity, price, name, category
-        FROM order_products
-        WHERE order_id = ?
-        AND LOWER(category) NOT LIKE '%Others%'
-        AND LOWER(category) NOT LIKE '%paneer%'
-        AND LOWER(category) NOT LIKE '%ghee%'
-        AND LOWER(category) NOT LIKE '%butter%'
-        AND LOWER(category) NOT LIKE '%butter milk%'
+            INSERT INTO order_products (order_id, product_id, quantity, price, name, category,gst_rate)
+            SELECT ?, product_id, quantity, price, name, category,gst_rate
+            FROM order_products
+            WHERE order_id = ?
+            AND LOWER(category) NOT LIKE '%others%'
+            AND LOWER(category) NOT LIKE '%paneer%'
+            AND LOWER(category) NOT LIKE '%ghee%'
+            AND LOWER(category) NOT LIKE '%butter%'
+            AND LOWER(category) NOT LIKE '%butter milk%'
         `;
         const orderProductsValues = [newOrderId, reference_order_id];
-        await executeQuery(insertOrderProductsQuery, orderProductsValues);
+        const insertProductsResult = await executeQuery(insertOrderProductsQuery, orderProductsValues);
+        console.log(`Inserted ${insertProductsResult.affectedRows} products for order ${newOrderId}`);
 
-        // 3. Update total_amount in orders table
+        // 5. Update total_amount in orders table
         const updateOrderTotalQuery = `
             UPDATE orders
             SET total_amount = (
-                SELECT SUM(quantity * price)
+                SELECT COALESCE(SUM(quantity * price), 0)
                 FROM order_products
                 WHERE order_id = ?
             )
@@ -585,9 +783,29 @@ router.post("/on-behalf", async (req, res) => {
         const updateTotalValues = [newOrderId, newOrderId];
         await executeQuery(updateOrderTotalQuery, updateTotalValues);
 
+        // 6. Verify the order has products
+        const verifyOrderProductsQuery = `
+            SELECT COUNT(*) as product_count
+            FROM order_products
+            WHERE order_id = ?
+        `;
+        const verifyResult = await executeQuery(verifyOrderProductsQuery, [newOrderId]);
+        const productCount = verifyResult[0].product_count;
+        console.log(`Order ${newOrderId} has ${productCount} products`);
+
+        if (productCount === 0) {
+            // Optionally, delete the order if no products were added
+            const deleteOrderQuery = `DELETE FROM orders WHERE id = ?`;
+            await executeQuery(deleteOrderQuery, [newOrderId]);
+            return res.status(400).json({
+                message: `No products were added to ${order_type} order. Order creation cancelled.`
+            });
+        }
+
         return res.status(201).json({
             message: "Admin order placed successfully with products copied.",
-            new_order_id: newOrderId
+            new_order_id: newOrderId,
+            product_count: productCount
         });
 
     } catch (error) {
@@ -1615,9 +1833,9 @@ router.get("/allowed-shift", async (req, res) => {
         let isShiftAllowed = false;
 
         if (shift === 'AM') {
-            isShiftAllowed = (currentHour >= 6 && currentHour < 14);
+            isShiftAllowed = (currentHour >= 6 && currentHour < 24);
         } else if (shift === 'PM') {
-            isShiftAllowed = (currentHour >= 12 && currentHour < 22);
+            isShiftAllowed = (currentHour >= 6 && currentHour < 24);
         }
 
         return res.status(200).json({
@@ -1630,6 +1848,467 @@ router.get("/allowed-shift", async (req, res) => {
         return res.status(500).json({ message: "Internal server error while checking shift allowance", error: error.message, allowed: false }); // Include allowed: false in error response
     }
 });
+
+
+
+
+
+
+// API to get all orders
+router.get("/get-all-orders", async (req, res) => {
+    try {
+        // Query to select all orders
+        const query = "SELECT * FROM orders";
+        
+        // Execute the query
+        const result = await executeQuery(query);
+
+        if (result.length > 0) {
+            return res.status(200).json({ 
+                message: "Orders fetched successfully",
+                data: result 
+            });
+        } else {
+            return res.status(404).json({ message: "No orders found" });
+        }
+    } catch (error) {
+        console.error("Error fetching orders:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+// price update api - Corrected to update a specific product
+// --- 2. UPDATE Order Product Price and Total Amount (Modified Endpoint) ---
+router.put("/update_order_price/:orderId/product/:productId", async (req, res) => {
+    try {
+        const { orderId, productId } = req.params; // Extract orderId and productId from URL params
+        const { newPrice } = req.body; // Extract newPrice from request body
+
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: "Order ID is required" });
+        }
+
+        if (!productId) {
+            return res.status(400).json({ success: false, message: "Product ID is required" });
+        }
+
+        if (newPrice === undefined || newPrice === null || isNaN(parseFloat(newPrice))) {
+            return res.status(400).json({ success: false, message: "New price is required and must be a valid number" });
+        }
+
+        // --- Step 1: Update the price for a specific product in the order_products table ---
+        const updateOrderPriceQuery = `
+            UPDATE order_products
+            SET price = ?
+            WHERE order_id = ? AND product_id = ?
+        `;
+        const updateResult = await executeQuery(updateOrderPriceQuery, [newPrice, orderId, productId]);
+
+        if (updateResult.affectedRows > 0) {
+            console.log(`Updated price for order ID: ${orderId}, product ID: ${productId} to: ${newPrice}`);
+
+            // --- Step 2: Fetch all products for the updated order to recalculate total amount ---
+            const fetchOrderProductsQuery = `
+                SELECT price, quantity
+                FROM order_products
+                WHERE order_id = ?
+            `;
+            const orderProductsResult = await executeQuery(fetchOrderProductsQuery, [orderId]);
+            const orderProducts = orderProductsResult;
+
+            // --- Step 3: Calculate the new total amount for the order ---
+            let newTotalAmount = 0;
+            if (orderProducts && orderProducts.length > 0) {
+                newTotalAmount = orderProducts.reduce((sum, product) => sum + (product.price * product.quantity), 0);
+            }
+
+            // --- Step 4: Update the total_amount in the orders table ---
+            const updateOrdersTableQuery = `
+                UPDATE orders
+                SET total_amount = ?
+                WHERE id = ?
+            `;
+            const updateOrdersResult = await executeQuery(updateOrdersTableQuery, [newTotalAmount, orderId]);
+
+            if (updateOrdersResult.affectedRows > 0) {
+                console.log(`Updated total_amount for order ID: ${orderId} to: ${newTotalAmount}`);
+                res.json({ success: true, message: `Price for order ID ${orderId}, product ID ${productId} updated successfully to ${newPrice}. Total amount updated to ${newTotalAmount}` });
+            } else {
+                // Handle the case where the order might not exist in the orders table (though it should)
+                res.status(404).json({ success: false, message: `Order with ID ${orderId} found, product price updated, but failed to update total amount in orders table.` });
+            }
+
+        } else {
+            res.status(404).json({ success: false, message: `Order with ID ${orderId} or product with ID ${productId} not found or no such product associated with the order to update` });
+        }
+
+    } catch (error) {
+        console.error("Error updating order price and total amount:", error);
+        res.status(500).json({ success: false, message: "Internal Server Error", error: error });
+    }
+});
+
+
+
+router.post("/customer_price_update", async (req, res) => {
+    try {
+        const { customer_id, product_id, customer_price } = req.body;
+
+        // Validate input
+        if (!customer_id || !product_id || customer_price === undefined || customer_price === null || isNaN(parseFloat(customer_price))) {
+            return res.status(400).json({ message: "customer_id, product_id, and customer_price are required and customer_price must be a valid number" });
+        }
+
+        // Check if a record exists for the given customer and product
+        const checkQuery = "SELECT * FROM customer_product_prices WHERE customer_id = ? AND product_id = ?";
+        const checkValues = [customer_id, product_id];
+        const existingRecord = await executeQuery(checkQuery, checkValues);
+
+        let result;
+        if (existingRecord.length > 0) {
+            // Update the existing record
+            const updateQuery = "UPDATE customer_product_prices SET customer_price = ? WHERE customer_id = ? AND product_id = ?";
+            const updateValues = [customer_price, customer_id, product_id];
+            result = await executeQuery(updateQuery, updateValues);
+
+            if (result.affectedRows > 0) {
+                return res.status(200).json({ message: "Customer price updated successfully" });
+            } else {
+                return res.status(200).json({ message: "Customer price updated successfully (no changes made)" });
+            }
+        } else {
+            // Insert a new record
+            const insertQuery = "INSERT INTO customer_product_prices (customer_id, product_id, customer_price) VALUES (?, ?, ?)";
+            const insertValues = [customer_id, product_id, customer_price];
+            result = await executeQuery(insertQuery, insertValues);
+
+            if (result.affectedRows > 0) {
+                return res.status(201).json({ message: "Customer price added successfully" });
+            } else {
+                return res.status(500).json({ message: "Failed to add customer price" });
+            }
+        }
+    } catch (error) {
+        console.error("Error updating/adding customer price:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+
+router.get("/customer_price_check", async (req, res) => {
+    try {
+        const { customer_id } = req.query; // Assuming customer_id is passed as a query parameter
+
+        // Validate input
+        if (!customer_id) {
+            return res.status(400).json({ message: "customer_id is required" });
+        }
+
+        // Query to fetch all product IDs and prices for the given customer
+        const query = "SELECT product_id, customer_price FROM customer_product_prices WHERE customer_id = ?";
+        const values = [customer_id];
+
+        const results = await executeQuery(query, values);
+
+        if (results.length > 0) {
+            return res.status(200).json(results); // Return the array of product_id and customer_price
+        } else {
+            return res.status(404).json({ message: "No prices found for the given customer" });
+        }
+    } catch (error) {
+        console.error("Error fetching customer prices:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+
+
+
+// API endpoint to update user's auto_am_order and auto_pm_order
+router.post("/update-auto-order-preferences", async (req, res) => {
+    try {
+        const { auto_am_order, auto_pm_order, customer_id } = req.body; // Changed to accept customer_id
+
+        // Validate input
+        if (!customer_id) {
+            return res.status(400).json({ message: "customer_id is required.", success: false });
+        }
+        if (auto_am_order !== 'Yes' && auto_am_order !== 'No' && auto_am_order !== null && auto_am_order !== undefined) {
+            return res.status(400).json({ message: "Invalid value for auto_am_order. Must be 'Yes' or 'No'." });
+        }
+        if (auto_pm_order !== 'Yes' && auto_pm_order !== 'No' && auto_pm_order !== null && auto_pm_order !== undefined) {
+            return res.status(400).json({ message: "Invalid value for auto_pm_order. Must be 'Yes' or 'No'." });
+        }
+
+        // Update query
+        const query = "UPDATE users SET auto_am_order = ?, auto_pm_order = ? WHERE customer_id = ?"; // Assuming your users table has an 'id' column that corresponds to the customer_id
+
+        // Values to be inserted into the query
+        const values = [auto_am_order, auto_pm_order, customer_id];
+
+        // Execute the query
+        const result = await executeQuery(query, values);
+
+        if (result.affectedRows > 0) {
+            return res.status(200).json({ message: "Auto order preferences updated successfully", success: true });
+        } else {
+            return res.status(404).json({ message: "Customer not found or preferences not updated", success: false });
+        }
+    } catch (error) {
+        console.error("Error updating auto order preferences:", error);
+        return res.status(500).json({ message: "Internal server error", success: false, error: error.message });
+    }
+});
+
+
+router.post("/global-price-update", async (req, res) => {
+    try {
+        const { product_id, new_discount_price } = req.body;
+
+        // Validate input
+        if (!product_id || !new_discount_price) {
+            return res.status(400).json({ message: "product_id and new_discount_price are required" });
+        }
+
+        // Step 1: Fetch the fixed price (MRP) from the products table
+        const selectQuery = "SELECT price FROM products WHERE id = ?";
+        const productResult = await executeQuery(selectQuery, [product_id]);
+
+        if (productResult.length === 0) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        const fixedPrice = parseFloat(productResult[0].price); // Use price (MRP) as the base
+        const newPrice = parseFloat(new_discount_price);
+        const priceDifference = newPrice - fixedPrice; // Calculate difference from fixed price
+
+        console.log("Fixed Price (MRP):", fixedPrice);
+        console.log("New Discount Price:", newPrice);
+        console.log("Price Difference:", priceDifference);
+
+        // Step 2: Update customer_product_prices table
+        const updateCustomerPricesQuery = `
+            UPDATE customer_product_prices 
+            SET customer_price = customer_price + ? 
+            WHERE product_id = ?
+        `;
+        const customerUpdateResult = await executeQuery(updateCustomerPricesQuery, [priceDifference, product_id]);
+
+        console.log("Customer rows affected:", customerUpdateResult.affectedRows);
+
+        // Step 3: Update the products table with the new discountPrice
+        const updateProductQuery = "UPDATE products SET discountPrice = ? WHERE id = ?";
+        const productUpdateResult = await executeQuery(updateProductQuery, [newPrice, product_id]);
+
+        if (productUpdateResult.affectedRows === 0) {
+            return res.status(404).json({ message: "Failed to update product price" });
+        }
+
+        return res.status(200).json({
+            message: "Global price update completed successfully",
+            affectedCustomerRows: customerUpdateResult.affectedRows,
+        });
+    } catch (error) {
+        console.error("Error in global price update:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+
+router.get("/fetch-all-invoices", async (req, res) => {
+    try {
+        // Extract startDate and endDate from query parameters
+        const { startDate, endDate } = req.query;
+
+        // Validate date parameters
+        if (startDate && !moment(startDate, 'YYYY-MM-DD', true).isValid()) {
+            return res.status(400).json({ message: "Invalid startDate format. Use YYYY-MM-DD" });
+        }
+        if (endDate && !moment(endDate, 'YYYY-MM-DD', true).isValid()) {
+            return res.status(400).json({ message: "Invalid endDate format. Use YYYY-MM-DD" });
+        }
+
+        // Base SQL query
+        let query = `
+            SELECT 
+                i.invoice_id AS "Invoice No",
+                i.id AS "id",
+                i.invoice_date AS "Voucher Date",
+                i.invoice_date AS "Invoice Date",
+                u.name AS "Customer Name",
+                u.phone AS "Customer Mobile",
+                op.name AS "Product Description",
+                p.brand AS "Stock Group", 
+                op.category AS "Stock Category",
+                op.price AS "Rate",
+                op.quantity AS "Quantity",
+                (op.price * op.quantity) AS "Amount",
+                p.hsn_code AS "HSN",
+                op.gst_rate AS "GST %",
+                o.id AS "order_id",
+                o.placed_on AS "order_date"
+            FROM 
+                invoice i
+            JOIN 
+                orders o ON i.order_id = o.id COLLATE utf8mb4_0900_ai_ci
+            JOIN 
+                users u ON o.customer_id = u.customer_id COLLATE utf8mb4_0900_ai_ci
+            JOIN 
+                order_products op ON o.id = op.order_id COLLATE utf8mb4_0900_ai_ci
+            JOIN 
+                products p ON op.product_id = p.id COLLATE utf8mb4_0900_ai_ci
+        `;
+
+        // Add date filtering if parameters are provided
+        const queryParams = [];
+        if (startDate || endDate) {
+            query += ` WHERE `;
+            if (startDate) {
+                const startUnix = moment(startDate, 'YYYY-MM-DD').startOf('day').unix();
+                query += ` i.invoice_date >= ? `;
+                queryParams.push(startUnix);
+            }
+            if (startDate && endDate) {
+                query += ` AND `;
+            }
+            if (endDate) {
+                const endUnix = moment(endDate, 'YYYY-MM-DD').endOf('day').unix();
+                query += ` i.invoice_date <= ? `;
+                queryParams.push(endUnix);
+            }
+        }
+
+        query += `
+            ORDER BY
+                i.invoice_date DESC,
+                i.invoice_id COLLATE utf8mb4_0900_ai_ci, 
+                op.product_id COLLATE utf8mb4_0900_ai_ci
+        `;
+
+        // Execute the query with parameters
+        const results = await executeQuery(query, queryParams);
+
+        // Group by invoice to organize the data
+        const invoices = {};
+        results.forEach(row => {
+            if (!invoices[row['Invoice No']]) {
+                invoices[row['Invoice No']] = {
+                    invoice_id: row['Invoice No'],
+                    id: row['id'],
+                    voucher_date: row['Voucher Date'],
+                    invoice_date: row['Invoice Date'],
+                    customer_name: row['Customer Name'] || 'Unknown',
+                    customer_mobile: row['Customer Mobile'] || '-',
+                    order_id: row['order_id'] || '-',
+                    order_date: row['order_date'] || null,
+                    items: []
+                };
+            }
+            invoices[row['Invoice No']].items.push({
+                product_description: row['Product Description'] || '-',
+                stock_group: row['Stock Group'] || '-',
+                stock_category: row['Stock Category'] || '-',
+                rate: row['Rate'] || 0,
+                quantity: row['Quantity'] || 0,
+                amount: row['Amount'] || 0,
+                hsn: row['HSN'] || '-',
+                gst_percentage: row['GST %'] || 0
+            });
+        });
+
+        return res.status(200).json({
+            message: results.length > 0 ? "Invoices fetched successfully" : "No invoices found",
+            data: Object.values(invoices)
+        });
+    } catch (error) {
+        console.error("Error fetching invoices:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+
+router.get("/fetch-total-paid", async (req, res) => {
+    try {
+        const customerId = req.query.customer_id;
+        const month = req.query.month; // YYYY-MM format
+
+        if (!customerId || !month) {
+            return res.status(400).json({ message: "Customer ID and month are required" });
+        }
+
+        // Query to calculate total paid amount for the month
+        const query = `
+            SELECT SUM(payment_amount) as total_paid 
+            FROM payment_transactions 
+            WHERE customer_id = ? 
+            AND DATE_FORMAT(payment_date, '%Y-%m') = ?
+        `;
+        const params = [customerId, month];
+
+        const result = await executeQuery(query, params);
+
+        const totalPaid = result[0]?.total_paid || 0;
+
+        return res.status(200).json({
+            message: "Total paid amount fetched successfully",
+            total_paid: totalPaid
+        });
+    } catch (error) {
+        console.error("Error fetching total paid amount:", error);
+        return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+});
+
+
+router.get("/fetch-total-paid-by-day", async (req, res) => {
+    try {
+        const customerId = req.query.customer_id;
+        const date = req.query.date; // YYYY-MM-DD format
+
+        if (!customerId || !date) {
+            return res.status(400).json({ message: "Customer ID and date are required" });
+        }
+
+        // Query to calculate total paid amount for the specific day
+        const query = `
+            SELECT SUM(payment_amount) as total_paid 
+            FROM payment_transactions 
+            WHERE customer_id = ? 
+            AND DATE(payment_date) = ?
+        `;
+        const params = [customerId, date];
+
+        const result = await executeQuery(query, params);
+
+        const totalPaid = result[0]?.total_paid || 0;
+
+        return res.status(200).json({
+            message: "Total paid amount for the day fetched successfully",
+            total_paid: totalPaid
+        });
+    } catch (error) {
+        console.error("Error fetching total paid by day:", error);
+        return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+});
+
+router.get('/images/products/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const imagePath = path.join(__dirname, '..', 'uploads', 'products', filename);
+  
+    res.sendFile(imagePath, (err) => {
+      if (err) {
+        console.error('Error sending image:', err);
+        res.status(404).send('Image not found');
+      }
+    });
+  });
+
 module.exports = router;
 
 

@@ -25,7 +25,7 @@ const findUserByUserName = async (userName) => {
 const getUserById = async (customerId) => {
   try {
     const userQuery =
-      "SELECT customer_id, name, username, phone, delivery_address, route FROM users WHERE customer_id = ?";
+      "SELECT customer_id, name, username, phone, delivery_address, route,auto_am_order,auto_pm_order FROM users WHERE customer_id = ?";
     const [user] = await executeQuery(userQuery, [customerId]);
 
     const latestOrderQuery = `SELECT 
@@ -282,7 +282,7 @@ const addOrderProducts = async (customerId, orderId, products) => {
               }
           }
 
-          const query = `INSERT INTO order_products (order_id, product_id, quantity, price, name, category) VALUES (?, ?, ?, ?, ?, ?);`;
+          const query = `INSERT INTO order_products (order_id, product_id, quantity, price, name, category,gst_rate) VALUES (?, ?, ?, ?, ?, ?, ?);`;
 
           return {
               query: query,
@@ -293,6 +293,7 @@ const addOrderProducts = async (customerId, orderId, products) => {
                   effectivePrice,
                   productData.name,
                   productData.category,
+                  productData.gst_rate
               ],
           };
       });
@@ -385,10 +386,14 @@ const createTransactionForCOD = async (orderId, customer_id, amount) => {
   }
 };
 
+
 const addUser = async (userDetails) => {
   try {
+    console.log('Starting user creation for customer ID:', userDetails.customer_id);
+    
+    // 1. Insert user
     const insertUserQuery = `
-      INSERT INTO users (customer_id, username, name, password, route,created_at, updated_at)
+      INSERT INTO users (customer_id, username, name, password, route, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
     `;
 
@@ -399,9 +404,107 @@ const addUser = async (userDetails) => {
       userDetails.password,
       userDetails.route,
     ]);
+    console.log('User record inserted successfully');
+
+    // 2. Update username to customer_id
+    const updateUsernameQuery = `
+      UPDATE users
+      SET username = customer_id
+      WHERE customer_id = ?;
+    `;
+    await executeQuery(updateUsernameQuery, [userDetails.customer_id]);
+    console.log('Username updated to customer_id');
+
+    // 3. Hash and update password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(userDetails.customer_id.toString(), salt);
+    const updatePasswordQuery = `
+      UPDATE users
+      SET password = ?
+      WHERE customer_id = ?;
+    `;
+    await executeQuery(updatePasswordQuery, [hashedPassword, userDetails.customer_id]);
+    console.log('Password hashed and updated successfully');
+
+    // 4. Insert credit limit
+    console.log('Attempting credit limit insertion for:', {
+      customer_id: userDetails.customer_id,
+      name: userDetails.name
+    });
+    
+    const insertCreditLimitQuery = `
+      INSERT INTO credit_limit (customer_id, customer_name, credit_limit)
+      VALUES (?, ?, ?)
+    `;
+    
+    const creditResult = await executeQuery(insertCreditLimitQuery, [
+      userDetails.customer_id,
+      userDetails.name,
+      25000 // Default credit limit
+    ]);
+    
+    console.log('Credit limit insertion result:', creditResult);
+
+    // 5. NEW: Assign user to admin based on route
+    console.log('Attempting to assign user to admin for route:', userDetails.route);
+    
+    // Find an admin with the same route
+    const findAdminQuery = `
+      SELECT id FROM users 
+      WHERE route = ? AND role = 'admin' 
+      LIMIT 1
+    `;
+    const adminResult = await executeQuery(findAdminQuery, [userDetails.route]);
+
+    if (adminResult.length === 0) {
+      console.log(`No admin found for route: ${userDetails.route}. Skipping admin assignment.`);
+    } else {
+      const adminId = adminResult[0].id;
+
+      // Check if the assignment already exists
+      const checkExistingAssignmentQuery = `
+        SELECT * FROM admin_assign 
+        WHERE admin_id = ? AND customer_id = ?
+      `;
+      const existingAssignment = await executeQuery(checkExistingAssignmentQuery, [
+        adminId,
+        userDetails.customer_id
+      ]);
+
+      if (existingAssignment.length > 0) {
+        console.log(`User ${userDetails.customer_id} already assigned to admin ${adminId}. Skipping.`);
+      } else {
+        // Insert assignment record
+        const insertAssignmentQuery = `
+          INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+          VALUES (?, ?, ?, NOW(), 'assigned', ?)
+        `;
+        await executeQuery(insertAssignmentQuery, [
+          adminId,
+          userDetails.customer_id,
+          userDetails.customer_id, // Assuming cust_id is same as customer_id
+          userDetails.route
+        ]);
+        console.log(`User ${userDetails.customer_id} assigned to admin ${adminId} successfully.`);
+      }
+    }
+
+    console.log('User creation and assignment completed successfully');
+
   } catch (error) {
-    console.error("Error addUser dbUtility", error.message);
-    throw new Error("Error in addUser.");
+    console.error('FULL ERROR DETAILS:', {
+      timestamp: new Date().toISOString(),
+      customerId: userDetails.customer_id,
+      errorMessage: error.message,
+      errorStack: error.stack,
+      queryParameters: {
+        customer_id: userDetails.customer_id,
+        name: userDetails.name,
+        route: userDetails.route
+      }
+    });
+    
+    throw new Error(`User creation failed: ${error.message}`);
   }
 };
 
@@ -533,8 +636,8 @@ const getAllUsers = async (searchQuery) => {
 const addProduct = async (productData) => {
   try {
     const query = `
-      INSERT INTO products (name, brand, category, price, discountPrice, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (name, brand, category, price, discountPrice, created_at, updated_at, hsn_code, gst_rate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
@@ -545,9 +648,13 @@ const addProduct = async (productData) => {
       productData.discountPrice,
       productData.created_at,
       productData.updated_at,
+      productData.hsn_code,
+      productData.gst_rate
     ];
 
+   
     const response = await executeQuery(query, values);
+   
     return response;
   } catch (error) {
     console.error("Error in addProduct dbUtility:", error);
@@ -588,18 +695,92 @@ const changePassword = async (id, oldPassword, newPassword) => {
 
 const updateUser = async (customer_id, userDetails) => {
   try {
-    const setPlaceholders = Object.keys(userDetails)
+    // Filter out undefined or null values to avoid SQL errors
+    const validDetails = Object.fromEntries(
+      Object.entries(userDetails).filter(([_, value]) => value !== undefined && value !== null)
+    );
+
+    // Create SET clause for valid fields
+    const setPlaceholders = Object.keys(validDetails)
       .map((key) => `${key} = ?`)
       .join(", ");
 
-    const updateQuery = `UPDATE users SET ${setPlaceholders} WHERE customer_id = ?`;
+    if (!setPlaceholders) {
+      throw new Error("No valid fields provided for update.");
+    }
 
-    const values = [...Object.values(userDetails), customer_id];
+    // Update the users table
+    const updateQuery = `UPDATE users SET ${setPlaceholders} WHERE customer_id = ?`;
+    const values = [...Object.values(validDetails), customer_id];
     const response = await executeQuery(updateQuery, values);
+    console.log(`User ${customer_id} updated successfully:`, response);
+
+    // If route is being updated, handle admin reassignment
+    if (validDetails.route) {
+      console.log(`Route update detected for ${customer_id}: new route = ${validDetails.route}`);
+
+      // Check if the user is already assigned to an admin
+      const checkExistingAssignmentQuery = `
+        SELECT admin_id, route FROM admin_assign 
+        WHERE customer_id = ?
+      `;
+      const existingAssignments = await executeQuery(checkExistingAssignmentQuery, [customer_id]);
+      console.log(`Existing assignments for ${customer_id}:`, existingAssignments);
+
+      // If the route has changed or no assignment exists, proceed with reassignment
+      const currentRoute = existingAssignments.length > 0 ? existingAssignments[0].route : null;
+      if (currentRoute !== validDetails.route || existingAssignments.length === 0) {
+        // Remove existing assignment(s) if they exist
+        if (existingAssignments.length > 0) {
+          const deleteAssignmentQuery = `
+            DELETE FROM admin_assign 
+            WHERE customer_id = ?
+          `;
+          await executeQuery(deleteAssignmentQuery, [customer_id]);
+          console.log(`Removed existing admin assignments for ${customer_id}`);
+        }
+
+        // Find an admin with the new route
+        const findAdminQuery = `
+          SELECT id FROM users 
+          WHERE route = ? AND role = 'admin' 
+          LIMIT 1
+        `;
+        const adminResult = await executeQuery(findAdminQuery, [validDetails.route]);
+        console.log(`Admin search for route ${validDetails.route}:`, adminResult);
+
+        if (adminResult.length === 0) {
+          console.log(`No admin found for route: ${validDetails.route}. Skipping admin assignment.`);
+        } else {
+          const adminId = adminResult[0].id;
+
+          // Insert new assignment record
+          const insertAssignmentQuery = `
+            INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+            VALUES (?, ?, ?, NOW(), 'assigned', ?)
+          `;
+          await executeQuery(insertAssignmentQuery, [
+            adminId,
+            customer_id,
+            customer_id, // Assuming cust_id is same as customer_id
+            validDetails.route
+          ]);
+          console.log(`User ${customer_id} assigned to admin ${adminId} for route ${validDetails.route}`);
+        }
+      } else {
+        console.log(`Route unchanged for ${customer_id}. Skipping admin reassignment.`);
+      }
+    }
+
     return response;
   } catch (error) {
-    console.error("Error in updateUser dbUtility:", error);
-    throw new Error("Failed to update user.");
+    console.error("Error in updateUser dbUtility:", {
+      customerId: customer_id,
+      errorMessage: error.message,
+      errorStack: error.stack,
+      userDetails
+    });
+    throw new Error(`Failed to update user: ${error.message}`);
   }
 };
 
@@ -733,16 +914,17 @@ const checkExistingOrder = async (customerId, orderDate, orderType) => {
   }
 };
 
+
 const updateProduct = async (
   id,
-  { name, brand, category, price, discountPrice, uom }
+  { name, brand, category, price, discountPrice, uom, hsn_code, gst_rate }
 ) => {
   try {
     const updated_at = Math.floor(Date.now() / 1000);
 
     const query = `
       UPDATE products 
-      SET name = ?, brand = ?, category = ?, price = ?, discountPrice = ?, uom = ?, updated_at = ?
+      SET name = ?, brand = ?, category = ?, price = ?, discountPrice = ?, uom = ?, updated_at = ?, hsn_code = ?, gst_rate = ?
       WHERE id = ?
     `;
 
@@ -753,18 +935,18 @@ const updateProduct = async (
       price,
       discountPrice,
       uom,
-      updated_at,
+      updated_at,  // Moved up to match the query
+      hsn_code,
+      gst_rate,
       id,
     ];
 
     const result = await executeQuery(query, values);
 
-    // Check if any rows were updated
     if (result.affectedRows === 0) {
-      return null; // No product was updated
+      return null;
     }
 
-    // Return the updated product details
     return {
       id,
       name,
@@ -774,6 +956,8 @@ const updateProduct = async (
       discountPrice,
       uom,
       updated_at,
+      hsn_code,
+      gst_rate
     };
   } catch (error) {
     console.error("Error in productDbUtility updateProduct:", error);

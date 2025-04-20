@@ -90,13 +90,9 @@ exports.getAllUsersService = async (searchQuery) => {
 
 exports.addProductService = async (productData) => {
   try {
-    // Check if product already exists
-    // const existingProduct = await getProductByName(productData.name);
-    // if (existingProduct) {
-    //   throw new Error("Product already exists.");
-    // }
-
+    
     const addResponse = await addProduct(productData);
+  
     return {
       statusCode: 201,
       response: {

@@ -50,8 +50,6 @@ adminRouter.post("/update", authenticate, authorizeAdmin, updateUserController);
 
 adminRouter.post(
   "/editProd",
-  authenticate,
-  authorizeAdmin,
   updateProductController
 );
 
