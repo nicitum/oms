@@ -71,16 +71,16 @@ const TabNavigator = () => {
                 tabBarLabelStyle: styles.tabLabel, // Custom label style
             }}
         >
-            <Tab.Screen
+           <Tab.Screen
                 name="Home"
-                component={isSuperAdmin ? AdminHomePage : HomeStack}
+                component={HomeStack}
                 options={{
                     tabBarIcon: ({ color, size }) => (
                         <MaterialCommunityIcons name="home-outline" size={size} color={color} />
                     ),
                 }}
             />
-
+            
             <Tab.Screen
                 name="Products"
                 component={ProductsComponent}

@@ -5,7 +5,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   Alert,
   Platform,
   ToastAndroid,
@@ -21,6 +21,7 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Picker } from "@react-native-picker/picker";
+import Icon from "react-native-vector-icons/MaterialIcons";
 
 const ItemsReport = () => {
   const navigation = useNavigation();
@@ -33,30 +34,25 @@ const ItemsReport = () => {
   const [selectedRoute, setSelectedRoute] = useState("All Routes");
   const [loadingUniqueRoutes, setLoadingUniqueRoutes] = useState(false);
   const [errorUniqueRoutes, setErrorUniqueRoutes] = useState(null);
+  const primaryColor = "#003366";
 
-  useEffect(() => {
-    fetchUniqueRoutes();
-    fetchItemReport();
-  }, [selectedDate]); // Fetch data only when date changes
-
-  const fetchUniqueRoutes = async () => {
+  const fetchUniqueRoutes = useCallback(async () => {
     setLoadingUniqueRoutes(true);
     setErrorUniqueRoutes(null);
     try {
       const response = await axios.get(`http://${ipAddress}:8090/get-unique-routes`);
-      console.log("Unique Routes Response:", response.data);
       if (response.status === 200) {
         setUniqueRoutes(["All Routes", ...response.data.routes]);
       } else {
-        setErrorUniqueRoutes(`Failed to fetch unique routes: Status ${response.status}`);
+        throw new Error(`Failed to fetch unique routes: Status ${response.status}`);
       }
     } catch (err) {
-      setErrorUniqueRoutes("Error fetching unique routes. Please check your network.");
+      setErrorUniqueRoutes("Failed to fetch routes. Please try again.");
       console.error("Error fetching unique routes:", err);
     } finally {
       setLoadingUniqueRoutes(false);
     }
-  };
+  }, []);
 
   const fetchItemReport = useCallback(async () => {
     setLoading(true);
@@ -68,10 +64,8 @@ const ItemsReport = () => {
 
       const response = await axios.get(`http://${ipAddress}:8090/item-report`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { date: formattedDate }, // Fetch all data for the date
+        params: { date: formattedDate },
       });
-
-      console.log("Item Report Response:", response.data);
 
       if (response.status === 200) {
         const data = response.data.itemReportData || [];
@@ -80,15 +74,20 @@ const ItemsReport = () => {
           setError("No data available for the selected date.");
         }
       } else {
-        setError(`Failed to fetch report: Status ${response.status}`);
+        throw new Error(`Failed to fetch report: Status ${response.status}`);
       }
     } catch (err) {
       console.error("Error fetching item report:", err);
-      setError("Failed to fetch item report. Please try again.");
+      setError("Failed to fetch report. Please try again.");
     } finally {
       setLoading(false);
     }
   }, [navigation, selectedDate]);
+
+  useEffect(() => {
+    fetchUniqueRoutes();
+    fetchItemReport();
+  }, [fetchUniqueRoutes, fetchItemReport]);
 
   const showDatePicker = () => setDatePickerVisibility(true);
   const hideDatePicker = () => setDatePickerVisibility(false);
@@ -98,32 +97,33 @@ const ItemsReport = () => {
   };
 
   const exportToExcel = async () => {
-    if (!reportData || reportData.length === 0) {
-      Alert.alert("No data to export", "Please ensure there is report data to export.");
+    if (!filteredReportData.length) {
+      Alert.alert("No Data", "No data available to export.");
       return;
     }
 
-    const wb = XLSX.utils.book_new();
-    const wsData = [
-      ["Route", "Product Name", "Quantity"],
-      ...reportData.map((item) => [item.route, item.product_name, item.total_quantity]),
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, "ItemReport");
-    const wbout = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
-    const uri = FileSystem.cacheDirectory + "ItemReport.xlsx";
+    try {
+      const wb = XLSX.utils.book_new();
+      const wsData = [
+        ["Route", "Product Name", "Quantity"],
+        ...filteredReportData.map((item) => [item.route, item.product_name, item.total_quantity]),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, "ItemReport");
+      const wbout = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+      const uri = FileSystem.cacheDirectory + "ItemReport.xlsx";
 
-    await FileSystem.writeAsStringAsync(uri, wbout, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+      await FileSystem.writeAsStringAsync(uri, wbout, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
 
-    const formattedDate = moment(selectedDate).format("YYYY-MM-DD");
-    save(
-      uri,
-      `ItemReport_${selectedRoute.replace(/\s+/g, '_')}_${formattedDate}.xlsx`,
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Item Report"
-    );
+      const formattedDate = moment(selectedDate).format("YYYY-MM-DD");
+      const filename = `ItemReport_${selectedRoute.replace(/\s+/g, '_')}_${formattedDate}.xlsx`;
+      save(uri, filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Item Report");
+    } catch (err) {
+      console.error("Error exporting to Excel:", err);
+      Alert.alert("Error", "Failed to export report.");
+    }
   };
 
   const shareAsync = async (uri, reportType) => {
@@ -162,34 +162,55 @@ const ItemsReport = () => {
       } catch (error) {
         console.error("Error saving file:", error);
         if (error.message.includes("permission")) await AsyncStorage.removeItem("itemReportDirectoryUri");
-        ToastAndroid.show(`Failed to save ${reportType}. Please try again.`, ToastAndroid.SHORT);
+        ToastAndroid.show(`Failed to save ${reportType}.`, ToastAndroid.SHORT);
       }
     } else {
       shareAsync(uri, reportType);
     }
   };
 
-  // Filter report data based on selected route
   const filteredReportData = selectedRoute === "All Routes"
     ? reportData
     : reportData.filter((item) => item.route === selectedRoute);
 
+  const renderReportItem = ({ item, index }) => (
+    <View style={styles.card}>
+      <View style={styles.cardContent}>
+        <View style={styles.cardRow}>
+          <Text style={styles.cardLabel}>Route:</Text>
+          <Text style={styles.cardValue}>{item.route}</Text>
+        </View>
+        <View style={styles.cardRow}>
+          <Text style={styles.cardLabel}>Product:</Text>
+          <Text style={styles.cardValue}>{item.product_name}</Text>
+        </View>
+        <View style={styles.cardRow}>
+          <Text style={styles.cardLabel}>Quantity:</Text>
+          <Text style={styles.cardValue}>{item.total_quantity}</Text>
+        </View>
+      </View>
+    </View>
+  );
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.header}>
+    <View style={styles.container}>
+      
+      <View style={styles.controlsContainer}>
         <TouchableOpacity style={styles.dateButton} onPress={showDatePicker}>
-          <Text style={styles.dateText}>{moment(selectedDate).format("DD/MM/YYYY")}</Text>
+          <Icon name="calendar-today" size={20} color="#fff" />
+          <Text style={styles.dateButtonText}>{moment(selectedDate).format("DD/MM/YYYY")}</Text>
         </TouchableOpacity>
-        <View style={styles.routePickerContainer}>
+        <View style={styles.pickerContainer}>
           {loadingUniqueRoutes ? (
-            <ActivityIndicator size="small" color="#007AFF" />
+            <ActivityIndicator size="small" color={primaryColor} />
           ) : errorUniqueRoutes ? (
-            <Text style={styles.error}>{errorUniqueRoutes}</Text>
+            <Text style={styles.errorText}>{errorUniqueRoutes}</Text>
           ) : (
             <Picker
               selectedValue={selectedRoute}
               onValueChange={(itemValue) => setSelectedRoute(itemValue)}
-              style={styles.routePicker}
+              style={styles.picker}
+              itemStyle={styles.pickerItem}
             >
               {uniqueRoutes.map((route) => (
                 <Picker.Item key={route} label={route} value={route} />
@@ -198,10 +219,10 @@ const ItemsReport = () => {
           )}
         </View>
         <TouchableOpacity style={styles.exportButton} onPress={exportToExcel}>
-          <Text style={styles.exportText}>Export</Text>
+          <Icon name="file-download" size={20} color="#fff" />
+          <Text style={styles.exportButtonText}>Export</Text>
         </TouchableOpacity>
       </View>
-
       <DateTimePickerModal
         isVisible={isDatePickerVisible}
         mode="date"
@@ -209,124 +230,181 @@ const ItemsReport = () => {
         onConfirm={handleConfirm}
         onCancel={hideDatePicker}
       />
-
-      <Text style={styles.title}>Item Order Report</Text>
-
       {loading ? (
-        <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={primaryColor} />
+          <Text style={styles.loadingText}>Loading report...</Text>
+        </View>
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
-      ) : filteredReportData.length > 0 ? (
-        <>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, { flex: 1 }]}>Route</Text>
-            <Text style={[styles.headerCell, { flex: 2 }]}>Product Name</Text>
-            <Text style={[styles.headerCell, { flex: 1 }]}>Qty</Text>
-          </View>
-          {filteredReportData.map((item, index) => (
-            <View key={index} style={styles.tableRow}>
-              <Text style={[styles.cell, { flex: 1 }]}>{item.route}</Text>
-              <Text style={[styles.cell, { flex: 2 }]}>{item.product_name}</Text>
-              <Text style={[styles.cell, { flex: 1 }]}>{item.total_quantity}</Text>
-            </View>
-          ))}
-        </>
+        <View style={styles.errorContainer}>
+          <Icon name="error" size={40} color="#dc3545" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchItemReport}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
-        <Text style={styles.noData}>No data found for selected date and route</Text>
+        <FlatList
+          data={filteredReportData}
+          renderItem={renderReportItem}
+          keyExtractor={(item, index) => index.toString()}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="inbox" size={40} color={primaryColor} />
+              <Text style={styles.emptyText}>No data found for selected date and route</Text>
+            </View>
+          }
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
       )}
-    </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
-    padding: 16,
-    backgroundColor: "#FFFFFF",
+    flex: 1,
+    backgroundColor: "#f5f7fa",
   },
   header: {
+    backgroundColor: "#003366",
+    padding: 20,
+    paddingTop: 40,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    elevation: 5,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#fff",
+    textAlign: "center",
+  },
+  controlsContainer: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 20,
+    margin: 16,
+    flexWrap: "wrap",
   },
   dateButton: {
-    backgroundColor: "#F0F0F0",
-    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#003366",
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
+    marginRight: 10,
   },
-  dateText: {
+  dateButtonText: {
     fontSize: 16,
-    color: "#333",
+    color: "#fff",
+    marginLeft: 8,
+    fontWeight: "600",
   },
-  routePickerContainer: {
+  pickerContainer: {
     flex: 1,
-    marginHorizontal: 10,
-    backgroundColor: "#F0F0F0",
+    backgroundColor: "#fff",
     borderRadius: 8,
-    justifyContent: "center",
+    elevation: 3,
+    marginRight: 10,
+    minWidth: 150,
   },
-  routePicker: {
-    height: 50,
+  picker: {
+    height: 48,
     color: "#333",
+  },
+  pickerItem: {
+    fontSize: 16,
   },
   exportButton: {
-    backgroundColor: "#007AFF",
-    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#003366",
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
   },
-  exportText: {
+  exportButtonText: {
     fontSize: 16,
-    color: "#FFFFFF",
-    fontWeight: "500",
-  },
-  title: {
-    fontSize: 24,
+    color: "#fff",
+    marginLeft: 8,
     fontWeight: "600",
-    color: "#333",
-    textAlign: "center",
-    marginBottom: 20,
   },
-  loader: {
-    marginTop: 50,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  error: {
+  loadingText: {
     fontSize: 16,
-    color: "#FF3B30",
-    textAlign: "center",
-    marginTop: 20,
+    color: "#003366",
+    marginTop: 10,
   },
-  noData: {
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorText: {
     fontSize: 16,
-    color: "#666",
+    color: "#dc3545",
     textAlign: "center",
-    marginTop: 20,
+    marginVertical: 10,
   },
-  tableHeader: {
+  retryButton: {
+    backgroundColor: "#003366",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "600",
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 20,
+  },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginBottom: 12,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  cardContent: {
+    padding: 16,
+  },
+  cardRow: {
     flexDirection: "row",
-    backgroundColor: "#F7F7F7",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
+    marginBottom: 8,
   },
-  headerCell: {
+  cardLabel: {
     fontSize: 16,
     fontWeight: "600",
+    color: "#003366",
+    width: 100,
+  },
+  cardValue: {
+    fontSize: 16,
     color: "#333",
-    paddingHorizontal: 10,
+    flex: 1,
   },
-  tableRow: {
-    flexDirection: "row",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
+  emptyContainer: {
+    alignItems: "center",
+    padding: 20,
   },
-  cell: {
-    fontSize: 15,
-    color: "#555",
-    paddingHorizontal: 10,
+  emptyText: {
+    fontSize: 16,
+    color: "#003366",
+    marginTop: 10,
+    textAlign: "center",
   },
 });
 

@@ -607,86 +607,104 @@ const UpdateOrderScreen = () => {
     };
 
     const handleAddProductToOrder = async (productToAdd) => {
-        if (!selectedOrderId) {
-            Alert.alert("Error", "Please select an order before adding products.");
-            return;
-        }
-
-        const isProductAlreadyAdded = products.some(p => p.product_id === productToAdd.id);
-        if (isProductAlreadyAdded) {
-            Toast.show({
-                type: 'info',
-                text1: 'Product Already Added',
-                text2: 'This product is already in the order. Please update quantity instead.'
-            });
+        if (!selectedOrderId) return Alert.alert("Error", "Please select an order.");
+        if (products.some(p => p.product_id === productToAdd.id)) {
+            Toast.show({ type: 'info', text1: 'Product Already Added', text2: 'Update quantity instead.' });
             setShowSearchModal(false);
             return;
         }
-
+    
         setLoading(true);
         setError(null);
-
         try {
             const token = await AsyncStorage.getItem("userAuthToken");
-            const url = `http://${ipAddress}:8090/add-product-to-order`;
-            const headers = {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json",
-            };
-            const requestBody = {
+            const orderToCheck = orders.find(order => order.id === selectedOrderId);
+            if (!orderToCheck) {
+                Toast.show({ type: 'error', text1: 'Order Not Found', text2: "The selected order no longer exists. Please select or create a new order." });
+                setSelectedOrderId(null);
+                setProducts([]);
+                await fetchAdminOrders();
+                return;
+            }
+            
+    
+            console.log("Raw productToAdd from SearchProductModal:", productToAdd);
+    
+            // Determine price: Check customer-specific price first, then fallback to productToAdd.price or latest price
+            let priceToUse = productToAdd.price; // Default price
+            if (selectedOrderCustomerId) { // Ensure customer ID is available
+                const customerPriceCheckUrl = `http://${ipAddress}:8090/customer_price_check?customer_id=${selectedOrderCustomerId}`;
+                const customerPriceResponse = await fetch(customerPriceCheckUrl, {
+                    method: 'GET',
+                    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }
+                });
+    
+                if (customerPriceResponse.ok) {
+                    const customerPrices = await customerPriceResponse.json();
+                    const specificPrice = customerPrices.find(item => item.product_id === productToAdd.id);
+                    if (specificPrice && specificPrice.customer_price !== undefined && specificPrice.customer_price !== null) {
+                        priceToUse = specificPrice.customer_price;
+                        console.log(`Using customer-specific price: ₹${priceToUse} for product ${productToAdd.id}`);
+                    }
+                } else {
+                    console.log("No customer-specific price found or fetch failed, falling back to default.");
+                }
+            }
+    
+            // If priceToUse is still invalid, fetch from /latest-product-price
+            if (priceToUse === undefined || priceToUse === null || isNaN(priceToUse)) {
+                const priceResponse = await fetch(`http://${ipAddress}:8090/latest-product-price?productId=${productToAdd.id}`, {
+                    method: 'GET',
+                    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }
+                });
+                if (priceResponse.ok) {
+                    const priceData = await priceResponse.json();
+                    priceToUse = priceData.price;
+                    console.log(`Using latest price from order_products: ₹${priceToUse} for product ${productToAdd.id}`);
+                } else {
+                    const errorText = await priceResponse.text();
+                    console.log("Failed to fetch latest price:", errorText);
+                    priceToUse = 0; // Final fallback if all else fails
+                    console.log(`Falling back to price: ₹${priceToUse} for product ${productToAdd.id}`);
+                }
+            }
+    
+            const gstRateToUse = productToAdd.gst_rate !== undefined ? productToAdd.gst_rate : 0;
+    
+            const payload = {
                 orderId: selectedOrderId,
                 productId: productToAdd.id,
                 quantity: 1,
-                price: productToAdd.price,
+                price: priceToUse,
                 name: productToAdd.name,
                 category: productToAdd.category,
+                gst_rate: gstRateToUse
             };
-
-            console.log("ADD PRODUCT TO ORDER - Request URL:", url);
-            console.log("ADD PRODUCT TO ORDER - Request Headers:", headers);
-            console.log("ADD PRODUCT TO ORDER - Request Body:", JSON.stringify(requestBody, null, 2));
-
-            const addProductResponse = await fetch(url, {
+            console.log("Payload being sent to add-product-to-order:", payload);
+    
+            const response = await fetch(`http://${ipAddress}:8090/add-product-to-order`, {
                 method: 'POST',
-                headers: headers,
-                body: JSON.stringify(requestBody)
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
             });
-
-            console.log("ADD PRODUCT TO ORDER - Response Status:", addProductResponse.status);
-            console.log("ADD PRODUCT TO ORDER - Response Status Text:", addProductResponse.statusText);
-
-            if (!addProductResponse.ok) {
-                const errorText = await addProductResponse.text();
-                const message = `Failed to add product to order. Status: ${addProductResponse.status}, Text: ${errorText}`;
-                console.error("ADD PRODUCT TO ORDER - Error Response Text:", errorText);
-                throw new Error(message);
+    
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.log("Error Response from server:", errorText);
+                throw new Error(`Failed to add product: ${response.status}, ${errorText}`);
             }
-
-            const addProductData = await addProductResponse.json();
-            console.log("ADD PRODUCT TO ORDER - Response Data:", addProductData);
-
+    
+            const addProductData = await response.json();
             if (addProductData.success) {
-                Toast.show({
-                    type: 'success',
-                    text1: 'Product Added to Order',
-                    text2: addProductData.message || `${productToAdd.name} has been added to the order.`
-                });
-                setShowSearchModal(false);
+                Toast.show({ type: 'success', text1: 'Product Added', text2: `${productToAdd.name} added with price ₹${priceToUse}.` });
                 fetchOrderProducts(selectedOrderId);
-                setIsOrderUpdated(false);
+                setShowSearchModal(false);
             } else {
-                Toast.show({
-                    type: 'error',
-                    text1: 'Failed to Add Product',
-                    text2: addProductData.message || "Failed to add product to order."
-                });
-                setError(addProductData.message || "Failed to add product to order.");
+                throw new Error(addProductData.message || "Failed to add product.");
             }
-
         } catch (error) {
-            console.error("ADD PRODUCT TO ORDER - Error:", error);
-            setError(error.message || "Failed to add product to order.");
-            Toast.show({ type: 'error', text1: 'Add Product Error', text2: error.message || "Failed to add product to order." });
+            setError(error.message || "Failed to add product.");
+            Toast.show({ type: 'error', text1: 'Add Product Error', text2: error.message });
         } finally {
             setLoading(false);
         }

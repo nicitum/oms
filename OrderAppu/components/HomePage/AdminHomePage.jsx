@@ -1,372 +1,444 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import {
-    View,
-    Text,
-    StyleSheet,
-    Image,
-    ScrollView,
-    Alert,
-    ActivityIndicator, // Import ActivityIndicator
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { checkTokenAndRedirect } from "../../services/auth";
 import { jwtDecode } from 'jwt-decode';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ipAddress } from "../../urls";
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 const AdminHomePage = () => {
-    const [userDetails, setUserDetails] = useState(null);
-    const [isLoading, setIsLoading] = useState(true); // Add loading state for initial page load
-    const [error, setError] = useState(null); // Add error state for initial page load
-    const [totalAmountDue, setTotalAmountDue] = useState(null); 
-    const [totalAmountPaid, setTotalAmountPaid] = useState(null);
-    const [totalAmountPaidCash, setTotalAmountPaidCash] = useState(null);
-    const [totalAmountPaidOnline, setTotalAmountPaidOnline] = useState(null);/// State for total amount due
-    const [isTotalDueLoading, setIsTotalDueLoading] = useState(false); 
-    const [isTotalPaidLoading, setIsTotalPaidLoading] = useState(false); // Loading state for total amount due section
-    const [totalDueError, setTotalDueError] = useState(null); 
-    const [totalPaidError, setTotalPaidError] = useState(null);// Error state for total amount due section
-    const navigation = useNavigation();
+  const [userDetails, setUserDetails] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [totalAmountDue, setTotalAmountDue] = useState(null);
+  const [totalAmountPaid, setTotalAmountPaid] = useState(null);
+  const [totalAmountPaidCash, setTotalAmountPaidCash] = useState(null);
+  const [totalAmountPaidOnline, setTotalAmountPaidOnline] = useState(null);
+  const [isTotalDueLoading, setIsTotalDueLoading] = useState(false);
+  const [isTotalPaidLoading, setIsTotalPaidLoading] = useState(false);
+  const [totalDueError, setTotalDueError] = useState(null);
+  const [totalPaidError, setTotalPaidError] = useState(null);
+  const navigation = useNavigation();
 
-    // Fetch user details from API - Copied from HomePage.jsx as requested
-    const userDetailsData1 = useCallback(async () => {
-        try {
-            const token = await checkTokenAndRedirect(navigation);
-            const response = await fetch(`http://${ipAddress}:8090/userDetails`, {
-                method: "GET",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            const userGetResponse = await response.json();
-            if (!response.ok || !userGetResponse.status) {
-                const message = userGetResponse.message || "Something went wrong";
-                Alert.alert("Failed", message);
-                setIsLoading(false);
-                setError(message); // Set error state
-                return null; // Indicate failure
-            }
+  // Fetch user details from API
+  const userDetailsData1 = useCallback(async () => {
+    try {
+      const token = await checkTokenAndRedirect(navigation);
+      const response = await fetch(`http://${ipAddress}:8090/userDetails`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const userGetResponse = await response.json();
+      if (!response.ok || !userGetResponse.status) {
+        const message = userGetResponse.message || "Something went wrong";
+        Alert.alert("Failed", message);
+        setIsLoading(false);
+        setError(message);
+        return null;
+      }
 
-            const decodedToken = jwtDecode(token); // Decode token here to access role
-            const userDetails = {
-                customerName: userGetResponse.user.name,
-                customerID: userGetResponse.user.customer_id,
-                route: userGetResponse.user.route, // Keep route if it's relevant for admin, if not, can remove
-                role: decodedToken.role, // Extract role from decoded token
-            };
+      const decodedToken = jwtDecode(token);
+      const userDetails = {
+        customerName: userGetResponse.user.name,
+        customerID: userGetResponse.user.customer_id,
+        route: userGetResponse.user.route,
+        role: decodedToken.role,
+      };
 
-            return userDetails;
+      return userDetails;
+    } catch (err) {
+      console.error("User details fetch error:", err);
+      setIsLoading(false);
+      setError("An error occurred while fetching user details.");
+      Alert.alert("Error", "An error occurred. Please try again.");
+      return null;
+    }
+  }, [navigation]);
 
-        } catch (err) {
-            console.error("User details fetch error:", err);
-            setIsLoading(false);
-            setError("An error occurred while fetching user details."); // Set error state
-            Alert.alert("Error", "An error occurred. Please try again.");
-            return null; // Indicate failure
-        }
-    }, [navigation]);
+  const fetchTotalAmountDue = useCallback(async () => {
+    setIsTotalDueLoading(true);
+    setTotalDueError(null);
+    try {
+      const token = await checkTokenAndRedirect(navigation);
+      const response = await fetch(`http://${ipAddress}:8090/admin/total-amount-due`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const message = `Failed to fetch total amount due. Status: ${response.status}`;
+        throw new Error(message);
+      }
+      const data = await response.json();
+      setTotalAmountDue(data.totalAmountDue);
+    } catch (error) {
+      console.error("Error fetching total amount due:", error);
+      setTotalDueError("Error fetching total amount due.");
+      setTotalAmountDue('Error');
+    } finally {
+      setIsTotalDueLoading(false);
+    }
+  }, [navigation]);
 
+  const fetchTotalAmountPaid = useCallback(async () => {
+    setIsTotalPaidLoading(true);
+    setTotalPaidError(null);
+    try {
+      const token = await checkTokenAndRedirect(navigation);
+      const response = await fetch(`http://${ipAddress}:8090/admin/total-amount-paid`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const message = `Failed to fetch total amount paid. Status: ${response.status}`;
+        throw new Error(message);
+      }
+      const data = await response.json();
+      setTotalAmountPaid(data.totalAmountPaid);
+      setTotalAmountPaidCash(data.totalAmountPaidCash);
+      setTotalAmountPaidOnline(data.totalAmountPaidOnline);
+    } catch (error) {
+      console.error("Error fetching total amount paid:", error);
+      setTotalPaidError("Error fetching total amount paid.");
+      setTotalAmountPaid('Error');
+    } finally {
+      setIsTotalPaidLoading(false);
+    }
+  }, [navigation]);
 
-    const fetchTotalAmountDue = useCallback(async () => {
-        setIsTotalDueLoading(true); // Start loading for total amount due
-        setTotalDueError(null); // Reset error for total amount due
-        try {
-            const token = await checkTokenAndRedirect(navigation); // Reuse token logic
-            const response = await fetch(`http://${ipAddress}:8090/admin/total-amount-due`, {
-                headers: {
-                    Authorization: `Bearer ${token}`, // Include token for authorization if needed
-                },
-            });
-            if (!response.ok) {
-                const message = `Failed to fetch total amount due. Status: ${response.status}`;
-                throw new Error(message);
-            }
-            const data = await response.json();
-            setTotalAmountDue(data.totalAmountDue); // Update totalAmountDue state
-        } catch (error) {
-            console.error("Error fetching total amount due:", error);
-            setTotalDueError("Error fetching total amount due."); // Set error state for total due
-            setTotalAmountDue('Error'); // Set to 'Error' to display error in UI
-        } finally {
-            setIsTotalDueLoading(false); // End loading for total amount due
-        }
-    }, [navigation]);
+  // Fetch data and update state
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    const userData = await userDetailsData1();
+    if (userData) {
+      setUserDetails(userData);
+      await fetchTotalAmountDue();
+      await fetchTotalAmountPaid();
+    }
+    setIsLoading(false);
+  }, [userDetailsData1, fetchTotalAmountDue, fetchTotalAmountPaid]);
 
-    const fetchTotalAmountPaid = useCallback(async () => {
-        setIsTotalPaidLoading(true); // Start loading for total amount due
-        setTotalDueError(null); // Reset error for total amount due
-        try {
-            const token = await checkTokenAndRedirect(navigation); // Reuse token logic
-            const response = await fetch(`http://${ipAddress}:8090/admin/total-amount-paid`, {
-                headers: {
-                    Authorization: `Bearer ${token}`, // Include token for authorization if needed
-                },
-            });
-            if (!response.ok) {
-                const message = `Failed to fetch total amount paid. Status: ${response.status}`;
-                throw new Error(message);
-            }
-            const data = await response.json();
-            setTotalAmountPaid(data.totalAmountPaid);
-            setTotalAmountPaidCash(data.totalAmountPaidCash)
-            setTotalAmountPaidOnline(data.totalAmountPaidOnline) // Update totalAmountDue state
-        } catch (error) {
-            console.error("Error fetching total amount paid:", error);
-            setTotalPaidError("Error fetching total amount paid."); // Set error state for total due
-            setTotalAmountPaid('Error'); // Set to 'Error' to display error in UI
-        } finally {
-            setIsTotalPaidLoading(false); // End loading for total amount due
-        }
-    }, [navigation]);
+  useFocusEffect(
+    useCallback(() => {
+      const fetchDataAsync = async () => await fetchData();
+      fetchDataAsync();
+    }, [fetchData])
+  );
 
-     // Fetch data and update state (modified to call fetchTotalAmountDue)
-     const fetchData = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
-        const userData = await userDetailsData1();
-        if (userData) {
-            setUserDetails(userData);
-            await fetchTotalAmountDue();
-            await fetchTotalAmountPaid(); // Fetch total amount due after user details
-        } else {
-            setIsLoading(false); // Stop loading even if userData fetch fails, to show error
-        }
-        setIsLoading(false); // Stop loading after all fetches are complete, success or fail for userData (error handled inside)
-    }, [userDetailsData1, fetchTotalAmountDue,fetchTotalAmountPaid]); // Added fetchTotalAmountDue to dependency array
+  const { customerName, role } = userDetails || {};
 
+  // Card component for financial metrics
+  const MetricCard = ({ title, value, icon, isLoading, error }) => (
+    <View style={styles.metricCard}>
+      <View style={styles.metricIconContainer}>
+        <MaterialCommunityIcons name={icon} size={24} color="#003366" />
+      </View>
+      <View style={styles.metricContent}>
+        <Text style={styles.metricTitle}>{title}</Text>
+        {isLoading ? (
+          <ActivityIndicator size="small" color="#003366" />
+        ) : error ? (
+          <Text style={styles.errorTextSmall}>{error}</Text>
+        ) : value === 'Error' ? (
+          <Text style={styles.errorTextSmall}>Failed to load data</Text>
+        ) : (
+          <Text style={styles.metricValue}>₹ {value}</Text>
+        )}
+      </View>
+    </View>
+  );
 
-    useFocusEffect(
-        useCallback(() => {
-            const fetchDataAsync = async () => await fetchData();
-            fetchDataAsync();
-        }, [fetchData])
-    );
+  return (
+    <View style={styles.mainContainer}>
+    {/* Header */}
+        <View style={styles.header}>
+          <Image source={require("../../assets/logo.jpg")} style={styles.logo} />
+          <View>
+            <Text style={styles.headerTitle}>Order Appu</Text>
+            <Text style={styles.headerSubtitle}>Admin Dashboard</Text>
+          </View>
+        </View>
 
-    const { customerName, role } = userDetails || {}; // Extract name and role
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#003366" />
+            <Text style={styles.loadingText}>Loading dashboard data...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={48} color="#d32f2f" />
+            <Text style={styles.errorText}>Error: {error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            {/* Welcome Card */}
+          <View style={styles.welcomeCard}>
+            <View style={styles.welcomeContent}>
+              <Text style={styles.welcomeText}>Welcome back,</Text>
+              <Text style={styles.userName}>{customerName || "Admin"}</Text>
+              <View style={styles.roleBadge}>
+                <Text style={styles.roleText}>{role || "Administrator"}</Text>
+              </View>
+            </View>
+            <View style={styles.welcomeImageContainer}>
+              <MaterialCommunityIcons name="account-tie" size={60} color="#003366" />
+            </View>
+          </View>
 
-    return (
-        <ScrollView contentContainerStyle={[styles.container, styles.gradientBackground]}>
-            {isLoading && (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#FDDA0D" />
-                    <Text style={styles.loadingText}>Loading Admin Home Page...</Text>
-                </View>
-            )}
+          {/* Financial Overview Section */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Financial Overview</Text>
+            
+            <View style={styles.metricsContainer}>
+              <MetricCard 
+                title="Total Outstanding" 
+                value={totalAmountDue} 
+                icon="cash-minus" 
+                isLoading={isTotalDueLoading} 
+                error={totalDueError} 
+              />
+              
+              <MetricCard 
+                title="Total Paid (Cash)" 
+                value={totalAmountPaidCash} 
+                icon="cash" 
+                isLoading={isTotalPaidLoading} 
+                error={totalPaidError} 
+              />
+              
+              <MetricCard 
+                title="Total Paid (Online)" 
+                value={totalAmountPaidOnline} 
+                icon="credit-card-outline" 
+                isLoading={isTotalPaidLoading} 
+                error={totalPaidError} 
+              />
+              
+              <MetricCard 
+                title="Total Amount Paid" 
+                value={totalAmountPaid} 
+                icon="cash-multiple" 
+                isLoading={isTotalPaidLoading} 
+                error={totalPaidError} 
+              />
+            </View>
+          </View>
 
-            {error && !isLoading && (
-                <View style={styles.errorContainer}>
-                    <Text style={styles.errorText}>Error: {error}</Text>
-                </View>
-            )}
+          {/* Quick Actions */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.actionsContainer}>
+            <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => navigation.navigate('Home', { screen: 'OrderHistorySA' })}
+            >
+                <MaterialCommunityIcons name="file-document-outline" size={24} color="#003366" />
+                <Text style={styles.actionText}>Order History</Text>
+            </TouchableOpacity>
 
-            {!isLoading && !error && (
-                <>
-                    {/* Logo Section */}
-                    <View style={styles.section}>
-                        <Image source={require("../../assets/SL.png")} style={styles.logo} />
-                        <View style={styles.companyInfo}>
-                            <Text style={[styles.companyName, styles.royalYellowText]}>Order Appu</Text>
-                            <Text style={[styles.proprietorName, styles.whiteText]}>Proprietor Lokesh Naidu</Text>
-                        </View>
-                    </View>
-
-                    {/* User Details Card */}
-                    <View style={styles.card}>
-                        <Text style={[styles.cardTitle, styles.royalYellowText]}>User Details</Text>
-                        <View style={styles.detailRow}>
-                            <Text style={[styles.detailLabel, styles.whiteText]}>Name:</Text>
-                            <Text style={[styles.detailValue, styles.whiteText]}>{customerName || "N/A"}</Text>
-                        </View>
-                        <View style={styles.detailRow}>
-                            <Text style={[styles.detailLabel, styles.whiteText]}>Role:</Text>
-                            <Text style={[styles.detailValue, styles.whiteText]}>{role || "N/A"}</Text>
-                        </View>
-                    </View>
-
-                    {/* Total Amount Due Card */}
-                    <View style={[styles.card, styles.amountDueCard]}>
-                        <Text style={[styles.cardTitle, styles.royalYellowText]}>Total Outstanding</Text>
-                        {isTotalDueLoading ? (
-                            <ActivityIndicator size="large" color="#FDDA0D" />
-                        ) : totalDueError ? (
-                            <Text style={styles.errorTextSmall}>{totalDueError}</Text>
-                        ) : totalAmountDue === 'Error' ? (
-                            <Text style={styles.errorTextSmall}>Failed to load amount due.</Text>
-                        ) : (
-                            <Text style={styles.amountDueValue}>₹ {totalAmountDue}</Text>
-                        )}
-                    </View>
-
-                    <View style={[styles.card, styles.amountDueCard]}>
-                        <Text style={[styles.cardTitle, styles.royalYellowText]}>Total Amount Paid Cash</Text>
-                        {isTotalDueLoading ? (
-                            <ActivityIndicator size="large" color="#FDDA0D" />
-                        ) : totalDueError ? (
-                            <Text style={styles.errorTextSmall}>{totalDueError}</Text>
-                        ) : totalAmountDue === 'Error' ? (
-                            <Text style={styles.errorTextSmall}>Failed to load amount due.</Text>
-                        ) : (
-                            <Text style={styles.amountDueValue}>₹ {totalAmountPaidCash}</Text>
-                        )}
-                    </View>
-                    <View style={[styles.card, styles.amountDueCard]}>
-                        <Text style={[styles.cardTitle, styles.royalYellowText]}>Total Amount Paid Online</Text>
-                        {isTotalDueLoading ? (
-                            <ActivityIndicator size="large" color="#FDDA0D" />
-                        ) : totalDueError ? (
-                            <Text style={styles.errorTextSmall}>{totalDueError}</Text>
-                        ) : totalAmountDue === 'Error' ? (
-                            <Text style={styles.errorTextSmall}>Failed to load amount due.</Text>
-                        ) : (
-                            <Text style={styles.amountDueValue}>₹ {totalAmountPaidOnline}</Text>
-                        )}
-                    </View>
-
-                      {/* Total Amount Paid Card */}
-                      <View style={[styles.card, styles.amountDueCard]}>
-                        <Text style={[styles.cardTitle, styles.royalYellowText]}>Total Amount Paid</Text>
-                        {isTotalDueLoading ? (
-                            <ActivityIndicator size="large" color="#FDDA0D" />
-                        ) : totalDueError ? (
-                            <Text style={styles.errorTextSmall}>{totalDueError}</Text>
-                        ) : totalAmountDue === 'Error' ? (
-                            <Text style={styles.errorTextSmall}>Failed to load amount due.</Text>
-                        ) : (
-                            <Text style={styles.amountDueValue}>₹ {totalAmountPaid}</Text>
-                        )}
-                    </View>
-               
-                </>
-            )}
+              <TouchableOpacity style={styles.actionButton}>
+                <MaterialCommunityIcons name="account-group-outline" size={24} color="#003366" />
+                <Text style={styles.actionText}>Customers</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => navigation.navigate('Home', { screen: 'InvoiceDisplay' })}
+            >
+                <MaterialCommunityIcons name="file-document-outline" size={24} color="#003366" />
+                <Text style={styles.actionText}>Invoice Display</Text>
+            </TouchableOpacity>
+            </View>
+          </View>
         </ScrollView>
-    );
+      )}
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flexGrow: 1,
-        paddingBottom: 20,
-        paddingTop: 20,
-        backgroundColor: '#ffffff',
-    },
-    amountDueValue: {
-        fontSize: 24, // Larger font size for the amount due
-        fontWeight: 'bold',
-        textAlign: 'center',
-    },
-    errorTextSmall: {
-        fontSize: 16,
-        color: '#d32f2f', // Red error text for amount due error
-        textAlign: 'center',
-    },
-    gradientBackground: {
-        backgroundColor: '#ffffff',
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#ffffff',
-    },
-    loadingText: {
-        marginTop: 10,
-        fontSize: 16,
-        color: '#333',
-    },
-    errorContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
-    },
-    errorText: {
-        fontSize: 18,
-        color: '#d32f2f',
-        textAlign: 'center',
-    },
-    section: {
-        flexDirection: "row",
-        backgroundColor: '#fff',
-        padding: 20,
-        borderRadius: 15,
-        marginHorizontal: 20,
-        marginBottom: 20,
-        alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    logo: {
-        width: 70,
-        height: 70,
-        resizeMode: 'contain',
-        marginRight: 15,
-    },
-    companyInfo: {
-        flex: 1,
-    },
-    companyName: {
-        fontSize: 22,
-        fontWeight: "bold",
-    },
-    proprietorName: {
-        fontSize: 17,
-        color: '#666',
-    },
-    card: {
-        backgroundColor: '#fff',
-        borderRadius: 15,
-        marginHorizontal: 20,
-        marginBottom: 15,
-        padding: 20,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    cardTitle: {
-        fontSize: 20,
-        fontWeight: "bold",
-        marginBottom: 15,
-    },
-    detailRow: {
-        flexDirection: "row",
-        marginBottom: 10,
-        alignItems: 'center',
-    },
-    detailLabel: {
-        fontSize: 17,
-        fontWeight: "500",
-        marginRight: 8,
-        flex: 1,
-        color: '#444',
-    },
-    detailValue: {
-        fontSize: 17,
-        flex: 2,
-        textAlign: 'right',
-        color: '#444',
-    },
-    amountDueCard: {
-        minHeight: 100,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    emptyCardText: {
-        fontSize: 18,
-        color: '#888',
-        fontStyle: 'italic',
-    },
-    royalYellowText: {
-        color: '#ff8f00', // Warm orange-yellow
-    },
-    whiteText: {
-        color: '#444', // Dark gray for better readability
-    },
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#f5f7fa',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#003366',
+    paddingVertical: 35,
+    paddingHorizontal: 20,
+    elevation: 4,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    resizeMode: 'contain',
+    marginRight: 12,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#e0e0e0',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#d32f2f',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#003366',
+    borderRadius: 4,
+  },
+  retryButtonText: {
+    color: '#ffffff',
+    fontWeight: '500',
+  },
+  scrollContent: {
+    padding: 16,
+  },
+  welcomeCard: {
+    flexDirection: 'row',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 2,
+  },
+  welcomeContent: {
+    flex: 1,
+  },
+  welcomeText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  userName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#003366',
+    marginBottom: 8,
+  },
+  roleBadge: {
+    backgroundColor: '#e6eef7',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    alignSelf: 'flex-start',
+  },
+  roleText: {
+    color: '#003366',
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  welcomeImageContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionContainer: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#003366',
+    marginBottom: 12,
+  },
+  metricsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  metricCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    width: '48%',
+    elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metricIconContainer: {
+    backgroundColor: '#e6eef7',
+    borderRadius: 8,
+    padding: 8,
+    marginRight: 12,
+  },
+  metricContent: {
+    flex: 1,
+  },
+  metricTitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  metricValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#003366',
+  },
+  errorTextSmall: {
+    fontSize: 12,
+    color: '#d32f2f',
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    width: '31%',
+    elevation: 2,
+  },
+  actionText: {
+    marginTop: 8,
+    color: '#003366',
+    fontWeight: '500',
+  },
 });
 
 export default AdminHomePage;

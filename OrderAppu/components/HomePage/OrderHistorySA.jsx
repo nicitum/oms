@@ -24,7 +24,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 
-const AdminOrderHistory = () => {
+const OrderHistorySA = () => {
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const navigation = useNavigation();
@@ -49,49 +49,41 @@ const AdminOrderHistory = () => {
 
     const fetchOrders = useCallback(async (dateFilter) => {
         setLoading(true);
+      
         try {
             const token = await AsyncStorage.getItem("userAuthToken");
-            const decodedToken = jwtDecode(token);
-            const adminId = decodedToken.id1;
+            if (!token) throw new Error("No authentication token found");
 
+    
             // Format the dateFilter as YYYY-MM-DD if provided, otherwise use today's date
             const formattedDate = dateFilter ? moment(dateFilter).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD");
-
+    
             // Construct the URL with the date query parameter
-            const baseUrl = `http://${ipAddress}:8090/get-admin-orders/${adminId}`;
-            const url = `${baseUrl}?date=${formattedDate}`;
-
-            const headers = {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-            };
-
-            console.log("FETCH ADMIN ORDERS - Request URL:", url);
-            console.log("FETCH ADMIN ORDERS - Request Headers:", headers);
-
-            const ordersResponse = await fetch(url, { headers });
-
-            console.log("FETCH ADMIN ORDERS - Response Status:", ordersResponse.status);
-            console.log("FETCH ADMIN ORDERS - Response Status Text:", ordersResponse.statusText);
-
-            if (!ordersResponse.ok) {
-                const errorText = await ordersResponse.text();
-                const message = `Failed to fetch admin orders. Status: ${ordersResponse.status}, Text: ${errorText}`;
-                console.error("FETCH ADMIN ORDERS - Error Response Text:", errorText);
-                throw new Error(message);
+            const url = `http://${ipAddress}:8090/get-orders-sa/?date=${formattedDate}`;
+    
+            const response = await axios.get(url, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                }
+            });
+            console.log("FETCH ADMIN ORDERS - Response Data:", response.data);
+    
+            if (!response.data || !response.data.status) {
+                throw new Error(response.data?.message || "No valid data received from server");
             }
-
-            const ordersData = await ordersResponse.json();
-            console.log("FETCH ADMIN ORDERS - Response Data:", ordersData);
-            const fetchedOrders = ordersData.orders;
-
-            // Set the orders directly since filtering is done on the backend
+    
+            const fetchedOrders = response.data.orders;
+            console.log("Fetched orders:", fetchedOrders);
+    
             setOrders(fetchedOrders);
-            console.log('Fetched orders:', fetchedOrders);
-
-        } catch (fetchOrdersError) {
-            console.error("FETCH ADMIN ORDERS - Fetch Error:", fetchOrdersError);
-            Alert.alert("Error", fetchOrdersError.message || "Failed to fetch admin orders.");
+    
+        } catch (error) {
+            const errorMessage = error.response?.data?.message ||
+                error.message ||
+                "Failed to fetch admin orders";
+            
+            console.error("FETCH ADMIN ORDERS - Error:", error);
         } finally {
             setLoading(false);
         }
@@ -590,4 +582,4 @@ const detailStyles = StyleSheet.create({
     }
 });
 
-export default AdminOrderHistory;
+export default OrderHistorySA;

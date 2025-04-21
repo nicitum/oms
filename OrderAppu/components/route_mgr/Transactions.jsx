@@ -25,7 +25,7 @@ const TransactionsPage = () => {
             }
             setUserAuthToken(token);
             const decodedToken = jwtDecode(token);
-            const currentAdminId = decodedToken.id1; // Assuming id1 is the admin ID
+            const currentAdminId = decodedToken.id1;
             setAdminId(currentAdminId);
             return { currentAdminId, token };
         } catch (err) {
@@ -52,20 +52,16 @@ const TransactionsPage = () => {
             });
 
             if (!response.ok) {
-                const message = `Failed to fetch assigned users. Status: ${response.status}`;
-                throw new Error(message);
+                throw new Error(`Failed to fetch assigned users. Status: ${response.status}`);
             }
 
             const responseData = await response.json();
-            console.log("Assigned Users Response:", responseData);
-
             if (responseData.success) {
                 setAssignedUsers(responseData.assignedUsers);
             } else {
                 throw new Error("No assigned users found in response");
             }
         } catch (error) {
-            console.error("Error fetching assigned users:", error);
             setError(error.message || "Error fetching assigned users.");
             setAssignedUsers([]);
         } finally {
@@ -73,24 +69,21 @@ const TransactionsPage = () => {
         }
     };
 
-    // Fetch transactions for all assigned users individually
+    // Fetch transactions
     const fetchTransactions = async () => {
         setLoading(true);
         setError(null);
         try {
             if (assignedUsers.length === 0) {
-                return; // Wait until assigned users are fetched
+                return;
             }
 
             const allTransactions = [];
             for (const user of assignedUsers) {
                 const customerId = user.cust_id;
-                console.log("Fetching transactions for customer ID:", customerId);
-
-                // Build query params for one customer at a time
                 let url = `http://${ipAddress}:8090/fetch-payment-transactions?customer_id=${customerId}`;
                 if (selectedDate) {
-                    const formattedDate = selectedDate.toISOString().split('T')[0]; // YYYY-MM-DD
+                    const formattedDate = selectedDate.toISOString().split('T')[0];
                     url += `&date=${formattedDate}`;
                 }
                 if (paymentFilter !== 'All') {
@@ -106,9 +99,8 @@ const TransactionsPage = () => {
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json();
                     console.warn(`Failed to fetch transactions for customer ${customerId}: ${response.status}`);
-                    continue; // Skip this customer and move to the next
+                    continue;
                 }
 
                 const data = await response.json();
@@ -117,7 +109,6 @@ const TransactionsPage = () => {
                 }
             }
 
-            console.log("All Transactions fetched:", allTransactions);
             setTransactions(allTransactions);
             if (allTransactions.length === 0) {
                 setError("No transactions found for the assigned customers.");
@@ -125,7 +116,6 @@ const TransactionsPage = () => {
                 setError(null);
             }
         } catch (err) {
-            console.error("Error fetching transactions:", err);
             setError(err.message || "Failed to fetch transactions.");
             setTransactions([]);
             Alert.alert("Error", `Failed to load transactions: ${err.message}`);
@@ -194,7 +184,7 @@ const TransactionsPage = () => {
 
             {loading ? (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#007bff" />
+                    <ActivityIndicator size="large" color="#003366" />
                     <Text style={styles.loadingText}>Loading transactions...</Text>
                 </View>
             ) : error ? (
@@ -232,7 +222,7 @@ const TransactionsPage = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f0f0f0',
+        backgroundColor: '#e6e9ef', // Light blue-gray for subtle contrast
         padding: 20,
     },
     headerContainer: {
@@ -241,31 +231,41 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     datePickerButton: {
-        backgroundColor: '#007bff',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderRadius: 5,
+        backgroundColor: '#003366', // Deep blue accent
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        borderRadius: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 3,
     },
     datePickerText: {
-        color: '#fff',
-        fontSize: 14,
+        color: '#ffffff',
+        fontSize: 16,
         fontWeight: '600',
     },
     filterButton: {
-        backgroundColor: '#28a745',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderRadius: 5,
+        backgroundColor: '#004d99', // Slightly lighter deep blue for distinction
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        borderRadius: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 3,
     },
     filterText: {
-        color: '#fff',
-        fontSize: 14,
+        color: '#ffffff',
+        fontSize: 16,
         fontWeight: '600',
     },
     headerText: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#333',
+        fontSize: 26,
+        fontWeight: '700',
+        color: '#003366', // Deep blue for header
         textAlign: 'center',
         marginBottom: 20,
     },
@@ -278,43 +278,48 @@ const styles = StyleSheet.create({
     loadingText: {
         marginTop: 10,
         fontSize: 16,
-        color: '#6c757d',
+        color: '#4a5a6b', // Muted blue-gray for text
     },
     errorText: {
         fontSize: 16,
-        color: 'red',
+        color: '#cc0000', // Red for errors to stand out
         textAlign: 'center',
         marginTop: 20,
     },
     noDataText: {
         fontSize: 16,
-        color: '#666',
+        color: '#4a5a6b', // Muted blue-gray
         textAlign: 'center',
         marginTop: 20,
     },
     tableContainer: {
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        padding: 10,
+        backgroundColor: '#ffffff',
+        borderRadius: 10,
+        padding: 15,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+        elevation: 3,
     },
     tableRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        paddingVertical: 8,
+        paddingVertical: 10,
         borderBottomWidth: 1,
-        borderBottomColor: '#eee',
+        borderBottomColor: '#d6deeb', // Light blue-gray for borders
     },
     tableHeader: {
         flex: 1,
-        fontSize: 14,
-        fontWeight: 'bold',
-        color: '#333',
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#003366', // Deep blue for headers
         textAlign: 'center',
     },
     tableCell: {
         flex: 1,
         fontSize: 14,
-        color: '#666',
+        color: '#2e3b4e', // Darker blue-gray for readability
         textAlign: 'center',
     },
 });

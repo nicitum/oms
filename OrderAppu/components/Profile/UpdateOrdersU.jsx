@@ -44,76 +44,56 @@ const UpdateOrdersU = () => {
         fetchUsersOrders();
     }, []);
 
-    const fetchUsersOrders = async () => {
+    const fetchUsersOrders = async (selectedDate = null) => {
         setLoading(true);
         setError(null);
         try {
             const token = await AsyncStorage.getItem("userAuthToken");
+            if (!token) {
+                throw new Error("Authentication token missing");
+            }
+    
             const decodedToken = jwtDecode(token);
             const custId = decodedToken.id;
-
-            const url = `http://${ipAddress}:8090/get-orders/${custId}`;
+    
+            // Construct the URL with optional date query parameter
+            let url = `http://${ipAddress}:8090/get-orders/${custId}`;
+            if (selectedDate) {
+                // Validate date format (YYYY-MM-DD)
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+                    throw new Error("Invalid date format. Use YYYY-MM-DD");
+                }
+                url += `?date=${selectedDate}`;
+            }
+            console.log("[DEBUG] Fetching orders from:", url);
+    
             const headers = {
-                "Authorization": `Bearer ${token}`,
+                Authorization: `Bearer ${token}`,
                 "Content-Type": "application/json",
+                Accept: "application/json",
             };
-
-            console.log("FETCH CUSTOMER ORDERS - Request URL:", url);
-            console.log("FETCH CUSTOMER ORDERS - Request Headers:", headers);
-
+    
             const ordersResponse = await fetch(url, { headers });
-
-            console.log("FETCH CUSTOMER ORDERS - Response Status:", ordersResponse.status);
-            console.log("FETCH CUSTOMER ORDERS - Response Status Text:", ordersResponse.statusText);
-
+    
             if (!ordersResponse.ok) {
                 const errorText = await ordersResponse.text();
-                const message = `Failed to fetch customer orders. Status: ${ordersResponse.status}, Text: ${errorText}`;
-                console.error("FETCH CUSTOMER ORDERS - Error Response Text:", errorText);
-                throw new Error(message);
+                throw new Error(`Failed to fetch customer orders. Status: ${ordersResponse.status}, Text: ${errorText}`);
             }
-
+    
             const ordersData = await ordersResponse.json();
-            console.log("FETCH CUSTOMER ORDERS - Response Data:", ordersData);
-            let fetchedOrders = ordersData.orders;
-
-            const todayFormatted = moment().format("YYYY-MM-DD");
-            console.log("DEBUG: Today's Formatted Date (YYYY-MM-DD):", todayFormatted);
-
-            const todaysOrders = fetchedOrders.filter(order => {
-                if (!order.placed_on) {
-                    console.log("DEBUG: order.placed_on is missing for order ID:", order.id);
-                    return false;
-                }
-
-                console.log("DEBUG: Raw order.placed_on value:", order.placed_on, typeof order.placed_on);
-
-                const parsedEpochSeconds = parseInt(order.placed_on, 10);
-                console.log("DEBUG: Parsed Epoch Timestamp (parseInt) - Seconds:", parsedEpochSeconds, typeof parsedEpochSeconds);
-
-                const orderDateMoment = moment.unix(parsedEpochSeconds);
-                console.log("DEBUG: Moment Object from Epoch (Seconds using .unix()):", orderDateMoment);
-                console.log("DEBUG: Moment Object valueOf (Epoch in ms AFTER .unix()):", orderDateMoment.valueOf());
-
-                const orderDateFormatted = orderDateMoment.format("YYYY-MM-DD");
-                console.log("DEBUG: Formatted Order Date (YYYY-MM-DD):", orderDateFormatted);
-
-                return orderDateFormatted === todayFormatted;
-            });
-
-            setOrders(todaysOrders);
-
+            if (!ordersData.status) {
+                throw new Error(ordersData.message || "Failed to fetch orders");
+            }
+    
+            setOrders(ordersData.orders);
             const amountsMap = {};
-            todaysOrders.forEach(order => {
-                amountsMap[order.id] = order.total_amount;
-            });
+            ordersData.orders.forEach(order => amountsMap[order.id] = order.total_amount);
             setOriginalOrderAmounts(amountsMap);
-            console.log("DEBUG: Original Order Amounts Map:", amountsMap);
-
         } catch (fetchOrdersError) {
-            console.error("FETCH CUSTOMER ORDERS - Fetch Error:", fetchOrdersError);
-            setError(fetchOrdersError.message || "Failed to fetch customer orders.");
-            Toast.show({ type: 'error', text1: 'Fetch Error', text2: fetchOrdersError.message || "Failed to fetch customer orders." });
+            console.error("[ERROR] Failed to fetch orders:", fetchOrdersError);
+            const errorMsg = fetchOrdersError.message || "Failed to fetch customer orders.";
+            setError(errorMsg);
+            Toast.show({ type: 'error', text1: 'Fetch Error', text2: errorMsg });
         } finally {
             setLoading(false);
         }
@@ -680,102 +660,90 @@ const UpdateOrdersU = () => {
             Alert.alert("Error", "Please select an order before adding products.");
             return;
         }
-    
         const isProductAlreadyAdded = products.some(p => p.product_id === productToAdd.id);
         if (isProductAlreadyAdded) {
-            Toast.show({
-                type: 'info',
-                text1: 'Product Already Added',
-                text2: 'This product is already in the order. Please update quantity instead.'
-            });
+            Toast.show({ type: 'info', text1: 'Product Already Added', text2: 'This product is already in the order. Please update quantity instead.' });
             setShowSearchModal(false);
             return;
         }
-    
         setLoading(true);
         setError(null);
-    
         try {
             const token = await AsyncStorage.getItem("userAuthToken");
+            const decodedToken = jwtDecode(token);
+            const custId = decodedToken.id;
+            const orderToCheck = orders.find(order => order.id === selectedOrderId);
+            if (orderToCheck?.loading_slip === 'Yes') {
+                Toast.show({ type: 'error', text1: 'Adding Product Prohibited', text2: "Loading slip already generated for this order." });
+                return;
+            }
     
-            const orderIdToCheck = selectedOrderId;
-            const orderToCheck = orders.find(order => order.id === orderIdToCheck);
+            let priceToUse = productToAdd.price;
+            // Fetch customer-specific price
+            const customerPriceCheckUrl = `http://${ipAddress}:8090/customer_price_check?customer_id=${custId}`;
+            const customerPriceResponse = await fetch(customerPriceCheckUrl, {
+                method: 'GET',
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }
+            });
     
-            if (orderToCheck) {
-                console.log("DEBUG - handleAddProductToOrder: Order from 'orders' state:", orderToCheck);
-                if (orderToCheck.loading_slip === 'Yes') {
-                    Toast.show({
-                        type: 'error',
-                        text1: 'Adding Product Prohibited',
-                        text2: "Loading slip already generated for this order."
-                    });
-                    setLoading(false);
-                    return;
+            if (customerPriceResponse.ok) {
+                const customerPrices = await customerPriceResponse.json();
+                const specificPrice = customerPrices.find(item => item.product_id === productToAdd.id);
+                if (specificPrice && specificPrice.customer_price !== undefined && specificPrice.customer_price !== null) {
+                    priceToUse = specificPrice.customer_price;
+                } else {
+                    // If no specific price found, fall back to fetching the latest price
+                    const latestPrice = await fetchLatestPriceFromOrderProducts(productToAdd.id);
+                    if (latestPrice !== null) {
+                        priceToUse = latestPrice;
+                    }
                 }
             } else {
-                console.warn("DEBUG - handleAddProductToOrder: Order not found in 'orders' state for ID:", orderIdToCheck);
-                Toast.show({ type: 'warning', text1: 'Warning', text2: "Could not verify loading slip status. Proceeding with adding product." });
+                console.error("Failed to fetch customer-specific prices:", customerPriceResponse.status, await customerPriceResponse.text());
+                // Fallback to fetching the latest price if customer price check fails
+                const latestPrice = await fetchLatestPriceFromOrderProducts(productToAdd.id);
+                if (latestPrice !== null) {
+                    priceToUse = latestPrice;
+                }
             }
     
             const url = `http://${ipAddress}:8090/add-product-to-order`;
-            const headers = {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json",
-            };
-            const requestBody = {
-                orderId: selectedOrderId,
-                productId: productToAdd.id,
-                quantity: 1,
-                price: productToAdd.price,
-                name: productToAdd.name,
-                category: productToAdd.category,
-            };
-    
-            console.log("ADD PRODUCT TO ORDER - Request URL:", url);
-            console.log("ADD PRODUCT TO ORDER - Request Headers:", headers);
-            console.log("ADD PRODUCT TO ORDER - Request Body:", JSON.stringify(requestBody, null, 2));
-    
             const addProductResponse = await fetch(url, {
                 method: 'POST',
-                headers: headers,
-                body: JSON.stringify(requestBody)
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    orderId: selectedOrderId,
+                    productId: productToAdd.id,
+                    quantity: 1,
+                    price: priceToUse, // Use the determined price
+                    name: productToAdd.name,
+                    category: productToAdd.category,
+                    gst_rate: productToAdd.gst_rate
+                })
             });
-    
-            console.log("ADD PRODUCT TO ORDER - Response Status:", addProductResponse.status);
-            console.log("ADD PRODUCT TO ORDER - Response Status Text:", addProductResponse.statusText);
     
             if (!addProductResponse.ok) {
                 const errorText = await addProductResponse.text();
-                const message = `Failed to add product to order. Status: ${addProductResponse.status}, Text: ${errorText}`;
-                console.error("ADD PRODUCT TO ORDER - Error Response Text:", errorText);
-                throw new Error(message);
+                throw new Error(`Failed to add product to order. Status: ${addProductResponse.status}, Text: ${errorText}`);
             }
     
             const addProductData = await addProductResponse.json();
-            console.log("ADD PRODUCT TO ORDER - Response Data:", addProductData);
-    
             if (addProductData.success) {
                 Toast.show({
                     type: 'success',
                     text1: 'Product Added to Order',
-                    text2: addProductData.message || `${productToAdd.name} has been added to the order.`
+                    text2: `${productToAdd.name} has been added with price ₹${priceToUse.toFixed(2)}.`
                 });
                 setShowSearchModal(false);
                 fetchOrderProducts(selectedOrderId);
                 setIsOrderUpdated(false);
             } else {
-                Toast.show({
-                    type: 'error',
-                    text1: 'Failed to Add Product',
-                    text2: addProductData.message || "Failed to add product to order."
-                });
+                Toast.show({ type: 'error', text1: 'Failed to Add Product', text2: addProductData.message || "Failed to add product to order." });
                 setError(addProductData.message || "Failed to add product to order.");
             }
-    
         } catch (error) {
-            console.error("ADD PRODUCT TO ORDER - Error:", error);
             setError(error.message || "Failed to add product to order.");
-            Toast.show({ type: 'error', text1: 'Add Product Error', text2: error.message || "Failed to add product to order." });
+            Toast.show({ type: 'error', text1: 'Add Product Error', text2: error.message });
         } finally {
             setLoading(false);
         }

@@ -54,12 +54,16 @@ const UpdateOrdersSA = () => {
             const decodedToken = jwtDecode(token);
             const adminId = decodedToken.id1;
     
-            const response = await axios.get(`http://${ipAddress}:8090/get-orders-sa`, {
+            const todayFormatted = moment().format("YYYY-MM-DD");
+            const url = `http://${ipAddress}:8090/get-orders-sa?date=${todayFormatted}`;
+            console.log("[DEBUG] Fetching admin orders from:", url);
+    
+            const response = await axios.get(url, {
                 headers: {
                     Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    Accept: "application/json"
                 }
-                // Removed orderBy param since the API now handles sorting
             });
     
             if (!response.data || !response.data.status) {
@@ -68,17 +72,7 @@ const UpdateOrdersSA = () => {
             
             console.log("Fetched orders data:", response.data);
             
-            const todayFormatted = moment().format("YYYY-MM-DD");
-            const todaysOrders = response.data.orders.filter(order => {
-                // Handle both timestamp (number) and string date formats
-                const orderDate = order.placed_on?.toString().length === 10 ? 
-                    moment.unix(parseInt(order.placed_on, 10)) :
-                    moment(order.placed_on);
-                    
-                return orderDate.format("YYYY-MM-DD") === todayFormatted;
-            });
-    
-            setOrders(todaysOrders);
+            setOrders(response.data.orders);
             
         } catch (error) {
             const errorMessage = error.response?.data?.message || 
@@ -95,6 +89,7 @@ const UpdateOrdersSA = () => {
             setLoading(false);
         }
     };
+
 
     const fetchOrderProducts = async (orderIdToFetch) => {
         setLoading(true);

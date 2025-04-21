@@ -20,6 +20,11 @@ import Invoice from '../route_mgr/Invoice';
 import ItemsReport from './ItemsReport';
 import UpdateOrdersSA from './UpdateOrdersSA';
 import PaymentHistory from './PaymentHistory';
+import OrderAcceptSA from './OrderAcceptSA';
+import AutoOrderPage from './AutoOrderPage';
+import LoadingSlipSA from './LoadingSlipSA';
+import InvoiceSA from './InvoiceSA';
+
 
 const Stack = createStackNavigator();
 
@@ -149,6 +154,35 @@ const ProfileStack = () => {
         name="PaymentHistory"
         component={PaymentHistory} 
         options={{ title: 'Payment History' }} 
+      />
+
+
+      <Stack.Screen 
+        name="OrderAcceptSA"
+        component={OrderAcceptSA}
+        options={{ title: 'Order Accept' }} 
+      />
+
+
+
+    <Stack.Screen 
+        name="AutoOrderPage"
+        component={AutoOrderPage}
+        options={{ title: 'Auto Order Page' }} 
+      />
+
+
+      <Stack.Screen 
+        name="LoadingSlipSA"
+        component={LoadingSlipSA}
+        options={{ title: ' ' }} 
+      />
+
+
+      <Stack.Screen 
+        name="InvoiceSA"
+        component={InvoiceSA}
+        options={{ title: 'Invoice Page' }} 
       />
 
 

@@ -176,16 +176,49 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                     </TouchableOpacity>
                 )}
 
-                {/* Reports Options for Superadmin */}
+      
                 {userRole === "superadmin" && (
                     <>
+                        <TouchableOpacity
+                            style={styles.menuItem}
+                            onPress={() => navigation.navigate("OrderAcceptSA")}
+                        >
+                            <View style={styles.menuIconText}>
+                                <MaterialIcons name="check-circle" size={24} color="#003366" />
+                                <Text style={styles.menuText}>Order Acceptance Page</Text>
+                            </View>
+                            <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
+                        </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.menuItem}
                             onPress={() => navigation.navigate("UpdateOrdersSA")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="edit" size={24} color="#003366" />
+                                <MaterialIcons name="edit-note" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Update/Edit Orders</Text>
+                            </View>
+                            <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.menuItem}
+                            onPress={() => navigation.navigate("LoadingSlipSA")}
+                        >
+                            <View style={styles.menuIconText}>
+                                <MaterialIcons name="receipt-long" size={24} color="#003366" />
+                                <Text style={styles.menuText}>Loading Slip Page </Text>
+                            </View>
+                            <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
+                        </TouchableOpacity>
+
+
+                        <TouchableOpacity
+                            style={styles.menuItem}
+                            onPress={() => navigation.navigate("InvoiceSA")}
+                        >
+                            <View style={styles.menuIconText}>
+                                <MaterialIcons name="receipt-long" size={24} color="#003366" />
+                                <Text style={styles.menuText}>Invoice Page</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
                         </TouchableOpacity>
@@ -195,7 +228,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                             onPress={() => navigation.navigate("CreditLimit")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="credit-card" size={24} color="#003366" />
+                                <MaterialIcons name="account-balance-wallet" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Credit Limit</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
@@ -205,7 +238,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                             onPress={() => navigation.navigate("Remarks")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="comment" size={24} color="#003366" />
+                                <MaterialIcons name="rate-review" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Remarks</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
@@ -215,7 +248,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                             onPress={() => navigation.navigate("CashCollectedReport")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="payments" size={24} color="#003366" />
+                                <MaterialIcons name="point-of-sale" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Cash Collected</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
@@ -225,7 +258,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                             onPress={() => navigation.navigate("AmountDueReport")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="assessment" size={24} color="#003366" />
+                                <MaterialIcons name="pending-actions" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Outstanding Report</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
@@ -235,7 +268,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                             onPress={() => navigation.navigate("AutoOrderPage")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="autorenew" size={24} color="#003366" />
+                                <MaterialIcons name="schedule" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Auto Order</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
@@ -245,7 +278,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                             onPress={() => navigation.navigate("ItemsReport")}
                         >
                             <View style={styles.menuIconText}>
-                                <MaterialIcons name="list-alt" size={24} color="#003366" />
+                                <MaterialIcons name="inventory" size={24} color="#003366" />
                                 <Text style={styles.menuText}>Items Report</Text>
                             </View>
                             <MaterialIcons name="keyboard-arrow-right" size={24} color="#003366" />
@@ -263,7 +296,7 @@ const ProfilePage = ({ setIsLoggedIn }) => {
                     </>
                 )}
 
-                {/* Privacy Policy and Terms & Conditions at the end - Available to all roles */}
+                                {/* Privacy Policy and Terms & Conditions at the end - Available to all roles */}
                 <TouchableOpacity style={styles.menuItem}>
                     <View style={styles.menuIconText}>
                         <MaterialIcons name="security" size={24} color="#003366" />
