@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "orderappu",
+    "slug": "orderappu",
+    "scheme": "orderappu",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "icon": "./assets/logo_1.png",
+    "splash": {
+      "image": "./assets/logo.jpg",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo_1.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.orderappu.orderappu",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
+      ] 
+    },
+    "web": {
+      "favicon": "./assets/logo.jpg"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8d84a2d0-d59c-408c-b0dc-bab0d998ed4a"
+      }
+    },
+    "owner": "nici_013",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true, 
+            "permissions": ["android.permission.INTERNET"] 
+          }
+        }
+      ]
+    ]
+  }
+}
