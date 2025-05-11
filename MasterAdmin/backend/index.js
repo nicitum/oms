@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3001; // Changed port to 3001
 
 // Configure CORS with specific options
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'], // Vite's default development port
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://147.93.110.150', 'http://localhost:8081', 'exp://'], // Added React Native dev server
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true

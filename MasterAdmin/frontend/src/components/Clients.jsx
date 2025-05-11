@@ -1,571 +1,639 @@
-"use client"
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { useState, useEffect, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
-import { Calendar, ChevronDown, ChevronUp, Edit, Loader2, LogOut, Trash2, ArrowLeft } from "lucide-react"
+const STATUS_OPTIONS = ['Active', 'Banned', 'Hold'];
 
-function Clients() {
-  const navigate = useNavigate()
-  const [clients, setClients] = useState([])
-  const [formData, setFormData] = useState({
-    client_id: null,
-    license_no: "",
-    issue_date: new Date().toISOString().split("T")[0],
-    expiry_date: "",
-    duration: "1",
-    duration_unit: "years",
-    status: "Active",
-  })
-  const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
-  const [isEditing, setIsEditing] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [retryCount, setRetryCount] = useState(0)
-  const MAX_RETRIES = 3
-
-  // Format date to yyyy-MM-dd
-  const formatDate = useCallback((date) => {
-    if (!date) return ""
-    const d = new Date(date)
-    return d.toISOString().split("T")[0]
-  }, [])
-
-  // Update expiry date based on duration and unit
-  const updateExpiryFromDuration = useCallback(
-    (duration, unit, issueDate) => {
-      if (!duration || !unit || !issueDate) return ""
-      const start = new Date(issueDate)
-      const durationNum = Number.parseInt(duration)
-      const end = new Date(start)
-
-      switch (unit) {
-        case "seconds":
-          end.setSeconds(start.getSeconds() + durationNum)
-          break
-        case "minutes":
-          end.setMinutes(start.getMinutes() + durationNum)
-          break
-        case "hours":
-          end.setHours(start.getHours() + durationNum)
-          break
-        case "days":
-          end.setDate(start.getDate() + durationNum)
-          break
-        case "months":
-          end.setMonth(start.getMonth() + durationNum)
-          break
-        case "years":
-          end.setFullYear(start.getFullYear() + durationNum)
-          break
-        default:
-          return ""
-      }
-      return formatDate(end)
-    },
-    [formatDate],
-  )
-
-  // Fetch clients with retry logic
-  const fetchClients = useCallback(
-    async (attempt = 1) => {
-      setIsLoading(true)
-      setError("")
-      try {
-        const token = localStorage.getItem("token")
-        if (!token) {
-          setError("Please log in to view clients")
-          navigate("/")
-          return
-        }
-
-        const response = await fetch("http://localhost:3001/api/clients", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        })
-
-        console.log(`Fetch clients attempt ${attempt} - status:`, response.status)
-        const data = await response.json()
-
-        if (response.ok) {
-          setClients(Array.isArray(data) ? data : [])
-          setRetryCount(0)
-        } else {
-          if ((response.status === 401 || response.status === 403) && attempt <= MAX_RETRIES) {
-            console.log(`Retry ${attempt}/${MAX_RETRIES} after ${response.status} error`)
-            setRetryCount(attempt)
-            setTimeout(() => fetchClients(attempt + 1), 1000 * attempt)
-          } else {
-            setError(data.error || `Failed to fetch clients (Status: ${response.status})`)
-            if (response.status === 401 || response.status === 403) {
-              localStorage.removeItem("token")
-              localStorage.removeItem("username")
-              navigate("/")
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Fetch clients error:", err)
-        if (attempt <= MAX_RETRIES) {
-          console.log(`Retry ${attempt}/${MAX_RETRIES} after network error`)
-          setRetryCount(attempt)
-          setTimeout(() => fetchClients(attempt + 1), 1000 * attempt)
-        } else {
-          setError("Network error occurred. Please check your connection or server status.")
-        }
-      } finally {
-        if (attempt === 1 || attempt > MAX_RETRIES) {
-          setIsLoading(false)
-        }
-      }
-    },
-    [navigate],
-  )
-
-  // Initial fetch
-  useEffect(() => {
-    fetchClients()
-  }, [fetchClients])
-
-  // Update expiry_date when duration or unit changes
-  useEffect(() => {
-    if (formData.duration && formData.duration_unit && formData.issue_date) {
-      const newExpiryDate = updateExpiryFromDuration(formData.duration, formData.duration_unit, formData.issue_date)
-      if (newExpiryDate !== formData.expiry_date) {
-        setFormData((prev) => ({ ...prev, expiry_date: newExpiryDate }))
-      }
-    }
-  }, [formData.duration, formData.duration_unit, formData.issue_date, updateExpiryFromDuration])
-
-  const handleDurationChange = (change) => {
-    const currentDuration = Number.parseInt(formData.duration) || 1
-    const newDuration = Math.max(1, currentDuration + change)
-    setFormData((prev) => ({ ...prev, duration: newDuration.toString() }))
+const getStatusWithExpiry = (client) => {
+  if (!client.expiry_date) return client.status || '';
+  
+  const today = new Date();
+  const expiryDate = new Date(client.expiry_date);
+  const diffDays = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+  
+  if (diffDays < 0) {
+    return 'Expired';
+  } else if (diffDays <= 1) {
+    return 'About to Expire';
   }
+  return client.status || '';
+};
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError("")
-    setSuccess("")
+const StatusBadge = ({ status }) => {
+  const getStatusStyle = () => {
+    switch (status) {
+      case 'Active':
+        return { backgroundColor: '#10B981', animation: 'none' };
+      case 'Banned':
+        return { backgroundColor: '#EF4444', animation: 'none' };
+      case 'Hold':
+        return { backgroundColor: '#F59E0B', animation: 'none' };
+      case 'Expired':
+        return { 
+          backgroundColor: '#991B1B',
+          animation: 'pulse 2s infinite'
+        };
+      case 'About to Expire':
+        return { 
+          backgroundColor: '#DC2626',
+          animation: 'bounce 1s infinite'
+        };
+      default:
+        return { backgroundColor: '#6B7280', animation: 'none' };
+    }
+  };
 
-    if (new Date(formData.issue_date) >= new Date(formData.expiry_date)) {
-      setError("Expiry date must be after issue date")
-      return
+  return (
+    <span style={{
+      ...styles.statusBadge,
+      ...getStatusStyle()
+    }}>
+      {status}
+    </span>
+  );
+};
+
+// Placeholder Logout component (replace with actual implementation if available)
+const Logout = ({ onLogout }) => {
+  return (
+    <button onClick={onLogout} style={styles.logoutButton}>
+      Logout
+    </button>
+  );
+};
+
+const Clients = () => {
+  const navigate = useNavigate();
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+
+  const today = new Date().toISOString().split('T')[0];
+  const [formData, setFormData] = useState({
+    client_id: '',
+    client_name: '',
+    license_no: '',
+    issue_date: today,
+    expiry_date: '',
+    status: '',
+    duration: '',
+  });
+
+  useEffect(() => {
+    fetchClients();
+  }, []);
+
+  const fetchClients = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch('http://147.93.110.150:3001/api/clients', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await response.json();
+      setClients(data);
+    } catch (err) {
+      console.error('Failed to fetch clients:', err);
+    }
+  };
+
+  const handleSelectClient = (client) => {
+    setSelectedClient(client);
+    setShowForm(false);
+    setIsEditMode(false);
+  };
+
+  const handleAddClientClick = () => {
+    setSelectedClient(null);
+    setShowForm(true);
+    setIsEditMode(false);
+    setFormData({
+      client_id: '',
+      client_name: '',
+      license_no: '',
+      issue_date: today,
+      expiry_date: '',
+      status: '',
+      duration: '',
+    });
+  };
+
+  const handleEditClientClick = () => {
+    if (selectedClient) {
+      setShowForm(true);
+      setIsEditMode(true);
+      setFormData({
+        client_id: selectedClient.client_id,
+        client_name: selectedClient.client_name,
+        license_no: selectedClient.license_no,
+        issue_date: today, // Always set to today
+        expiry_date: '', // Will be calculated based on duration
+        status: selectedClient.status || '',
+        duration: selectedClient.duration,
+      });
+    }
+  };
+
+  const handleFormChange = (e) => {
+    const { name, value } = e.target;
+    let updatedForm = { ...formData, [name]: value };
+
+    if (name === 'duration') {
+      const duration = parseInt(value);
+      if (!isNaN(duration) && duration > 0) {
+        const issueDate = new Date(today);
+        const expiryDate = new Date(issueDate);
+        expiryDate.setDate(expiryDate.getDate() + duration);
+        updatedForm.expiry_date = expiryDate.toISOString().split('T')[0];
+        updatedForm.issue_date = today; // Ensure issue date stays as today
+      } else {
+        updatedForm.expiry_date = '';
+      }
     }
 
-    if (Number.parseInt(formData.duration) <= 0) {
-      setError("Duration must be a positive number")
-      return
+    setFormData(updatedForm);
+  };
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    const token = localStorage.getItem('token');
+
+    // Validate form data
+    if (!formData.client_name || !formData.license_no || !formData.duration) {
+      alert('Please fill in all required fields (Client Name, License No, Duration).');
+      return;
     }
 
-    const url = isEditing
-      ? `http://localhost:3001/api/clients/${formData.client_id}`
-      : "http://localhost:3001/api/clients"
-    const method = isEditing ? "PUT" : "POST"
+    const url = isEditMode
+      ? 'http://147.93.110.150:3001/api/update_client'
+      : 'http://147.93.110.150:3001/api/add_client';
+    const method = isEditMode ? 'PUT' : 'POST';
 
     try {
-      setIsLoading(true)
       const response = await fetch(url, {
         method,
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          license_no: formData.license_no,
-          issue_date: formData.issue_date,
-          expiry_date: formData.expiry_date,
-          duration: Number.parseInt(formData.duration),
-          status: formData.status,
+          ...formData,
+          status: formData.status || '',
+          expiry_date: formData.expiry_date || null,
         }),
-      })
+      });
 
-      const data = await response.json()
       if (response.ok) {
-        setSuccess(data.message || (isEditing ? "Client updated successfully" : "Client added successfully"))
-        setFormData({
-          client_id: null,
-          license_no: "",
-          issue_date: new Date().toISOString().split("T")[0],
-          expiry_date: "",
-          duration: "1",
-          duration_unit: "years",
-          status: "Active",
-        })
-        setIsEditing(false)
-        fetchClients()
+        alert(isEditMode ? 'Client updated successfully!' : 'Client added successfully!');
+        fetchClients();
+        setShowForm(false);
+        setIsEditMode(false);
+        setSelectedClient(null);
       } else {
-        setError(data.error || "Failed to save client")
+        const errorData = await response.json();
+        alert(`Failed to ${isEditMode ? 'update' : 'add'} client: ${errorData.error || 'Unknown error'}`);
       }
-    } catch (err) {
-      setError("Network error occurred. Please try again.")
-    } finally {
-      setIsLoading(false)
+    } catch (error) {
+      console.error(`Error ${isEditMode ? 'updating' : 'submitting'} form:`, error);
+      alert(`Error ${isEditMode ? 'updating' : 'submitting'} form. Please try again.`);
     }
-  }
+  };
 
-  const handleEdit = (client) => {
-    // Calculate duration and unit from dates
-    const start = new Date(client.issue_date)
-    const end = new Date(client.expiry_date)
-    const diffTime = Math.abs(end - start)
-    const diffDays = diffTime / (1000 * 60 * 60 * 24)
-
-    let duration = 1
-    let unit = "years"
-
-    if (diffDays >= 365) {
-      duration = Math.round(diffDays / 365)
-      unit = "years"
-    } else if (diffDays >= 30) {
-      duration = Math.round(diffDays / 30)
-      unit = "months"
-    } else {
-      duration = Math.round(diffDays)
-      unit = "days"
-    }
-
-    setFormData({
-      client_id: client.client_id,
-      license_no: client.license_no,
-      issue_date: formatDate(client.issue_date),
-      expiry_date: formatDate(client.expiry_date),
-      duration: duration.toString(),
-      duration_unit: unit,
-      status: client.status,
-    })
-    setIsEditing(true)
-    setError("")
-    setSuccess("")
-  }
-
-  const handleDelete = async (client_id) => {
-    if (!window.confirm("Are you sure you want to delete this client?")) return
+  const handleLogout = async () => {
+    const token = localStorage.getItem('token');
+    // Assuming username is stored in localStorage or can be derived from token
+    const username = localStorage.getItem('username') || 'testuser'; // Replace with actual username retrieval
 
     try {
-      setIsLoading(true)
-      const response = await fetch(`http://localhost:3001/api/clients/${client_id}`, {
-        method: "DELETE",
+      const response = await fetch('http://147.93.110.150:3001/api/logout', {
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          'Content-Type': 'application/json',
         },
-      })
+        body: JSON.stringify({ username }),
+      });
 
-      const data = await response.json()
       if (response.ok) {
-        setSuccess(data.message || "Client deleted successfully")
-        fetchClients()
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        alert('Logout successful!');
+        // Redirect to login page (assuming there's a login route)
+        window.location.href = '/';
       } else {
-        setError(data.error || "Failed to delete client")
+        alert('Failed to logout.');
       }
-    } catch (err) {
-      setError("Network error occurred. Please try again.")
-    } finally {
-      setIsLoading(false)
+    } catch (error) {
+      console.error('Logout error:', error);
+      alert('Error logging out. Please try again.');
     }
-  }
+  };
 
-  const handleCancel = () => {
-    setFormData({
-      client_id: null,
-      license_no: "",
-      issue_date: new Date().toISOString().split("T")[0],
-      expiry_date: "",
-      duration: "1",
-      duration_unit: "years",
-      status: "Active",
-    })
-    setIsEditing(false)
-    setError("")
-    setSuccess("")
-  }
-
-  const formatDateTime = (dateTimeString) => {
-    if (!dateTimeString) return ""
-    const date = new Date(dateTimeString)
-    return date.toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
-
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case "Active":
-        return "bg-green-100 text-green-800"
-      case "Expired":
-        return "bg-red-100 text-red-800"
-      case "Suspended":
-        return "bg-amber-100 text-amber-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-800 tracking-tight">License Management</h1>
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => navigate("/dashboard")}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Dashboard
-            </button>
-            <button
-              onClick={() => {
-                localStorage.removeItem("token")
-                localStorage.removeItem("username")
-                navigate("/")
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
-          </div>
+    <div style={styles.page}>
+      <div style={styles.leftPanel}>
+        <div style={styles.headerSection}>
+          <h1 style={styles.mainTitle}>CLIENT MANAGEMENT DASHBOARD</h1>
+          <button 
+            onClick={() => navigate('/dashboard')}
+            style={styles.dashboardButton}
+          >
+            Go to Dashboard
+          </button>
         </div>
-
-        <div className="grid md:grid-cols-2 gap-8">
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-200">
-              <h2 className="text-xl font-semibold text-slate-800">{isEditing ? "Edit License" : "Add New License"}</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                {isEditing
-                  ? "Update the license information below"
-                  : "Enter the license details to create a new record"}
-              </p>
-            </div>
-            <div className="p-6">
-              {error && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-md flex items-start">
-                  <div className="flex-1">
-                    {error} {retryCount > 0 && `(Retry ${retryCount}/${MAX_RETRIES})`}
-                  </div>
-                </div>
-              )}
-              {success && (
-                <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-md flex items-start">
-                  <div className="flex-1">{success}</div>
-                </div>
-              )}
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">License Number</label>
-                  <input
-                    type="text"
-                    value={formData.license_no}
-                    onChange={(e) => setFormData({ ...formData, license_no: e.target.value })}
-                    required
-                    placeholder="Enter license number"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
-                    Issue Date (Today)
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.issue_date}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md cursor-not-allowed"
-                    disabled
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Duration</label>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center">
-                      <button
-                        type="button"
-                        onClick={() => handleDurationChange(-1)}
-                        className="px-3 py-2 bg-slate-100 border border-slate-300 rounded-l-md hover:bg-slate-200 transition-colors"
-                      >
-                        <ChevronDown className="h-4 w-4" />
-                      </button>
-                      <input
-                        type="number"
-                        value={formData.duration}
-                        onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
-                        required
-                        min="1"
-                        className="w-16 px-3 py-2 border-t border-b border-slate-300 text-center focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleDurationChange(1)}
-                        className="px-3 py-2 bg-slate-100 border border-slate-300 rounded-r-md hover:bg-slate-200 transition-colors"
-                      >
-                        <ChevronUp className="h-4 w-4" />
-                      </button>
-                    </div>
-
-                    <select
-                      value={formData.duration_unit}
-                      onChange={(e) => setFormData({ ...formData, duration_unit: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors"
-                    >
-                      <option value="days">Days</option>
-                      <option value="months">Months</option>
-                      <option value="years">Years</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
-                    Expiry Date (Auto-calculated)
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.expiry_date}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md"
-                    readOnly
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Expired">Expired</option>
-                    <option value="Suspended">Suspended</option>
-                  </select>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-md hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-colors disabled:opacity-70"
-                  >
-                    {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {isEditing ? "Update License" : "Add License"}
-                  </button>
-                  {isEditing && (
-                    <button
-                      type="button"
-                      onClick={handleCancel}
-                      className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-md hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </form>
-            </div>
+        {clients.map((client) => (
+          <div
+            key={client.client_id}
+            onClick={() => handleSelectClient(client)}
+            style={styles.clientItem}
+          >
+            {client.license_no}
           </div>
+        ))}
+        <button style={styles.addButton} onClick={handleAddClientClick}>
+          + Add Client
+        </button>
+        <Logout onLogout={handleLogout} />
+      </div>
 
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-200">
-              <h2 className="text-xl font-semibold text-slate-800">Licenses List</h2>
-              <p className="text-sm text-slate-500 mt-1">Manage all client licenses from this dashboard</p>
-            </div>
-            <div className="p-6">
-              {isLoading && (
-                <div className="flex justify-center items-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      <div style={styles.rightPanel}>
+        {selectedClient && (
+          <div style={styles.detailsContainer}>
+            <h2 style={styles.detailsTitle}>Client Information</h2>
+            <div style={styles.detailsGrid}>
+              <div style={styles.detailColumn}>
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>Client Name</span>
+                  <span style={styles.detailValue}>{selectedClient.client_name}</span>
                 </div>
-              )}
-
-              {!isLoading && clients.length === 0 && (
-                <div className="text-center py-8 text-slate-500">
-                  No licenses found. Add your first license to get started.
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>License No</span>
+                  <span style={styles.detailValue}>{selectedClient.license_no}</span>
                 </div>
-              )}
-
-              {!isLoading && clients.length > 0 && (
-                <div className="overflow-x-auto -mx-6">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          License No
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Issue Date
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Expiry Date
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-slate-200">
-                      {clients.map((client) => (
-                        <tr key={client.client_id} className="hover:bg-slate-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                            {client.license_no}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                            {formatDate(client.issue_date)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                            {formatDate(client.expiry_date)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass(
-                                client.status,
-                              )}`}
-                            >
-                              {client.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleEdit(client)}
-                                className="inline-flex items-center p-1.5 text-slate-700 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
-                              >
-                                <Edit className="h-3.5 w-3.5" />
-                                <span className="sr-only">Edit</span>
-                              </button>
-                              <button
-                                onClick={() => handleDelete(client.client_id)}
-                                className="inline-flex items-center p-1.5 text-red-700 bg-red-100 rounded hover:bg-red-200 transition-colors"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                <span className="sr-only">Delete</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>Issue Date</span>
+                  <span style={styles.detailValue}>{formatDate(selectedClient.issue_date)}</span>
                 </div>
-              )}
-
-              <div className="mt-4 text-xs text-slate-500">
-                <p>Click on a license to view more details or edit.</p>
+              </div>
+              <div style={styles.detailColumn}>
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>Expiry Date</span>
+                  <span style={styles.detailValue}>{formatDate(selectedClient.expiry_date)}</span>
+                </div>
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>Duration</span>
+                  <span style={styles.detailValue}>{selectedClient.duration} days</span>
+                </div>
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>Status</span>
+                  <StatusBadge status={getStatusWithExpiry(selectedClient)} />
+                </div>
+              </div>
+              <div style={styles.detailColumn}>
+                <div style={styles.detailItem}>
+                  <span style={styles.detailLabel}>Created At</span>
+                  <span style={styles.detailValue}>{formatDate(selectedClient.created_at)}</span>
+                </div>
+                
+                <div style={styles.detailAction}>
+                  <button style={styles.editButton} onClick={handleEditClientClick}>
+                    Edit Client
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {showForm && (
+          <div>
+            <h2 style={styles.subtitle}>{isEditMode ? 'Edit Client' : 'Add New Client'}</h2>
+            <form onSubmit={handleFormSubmit} style={styles.form}>
+              <input
+                type="text"
+                name="client_name"
+                placeholder="Client Name"
+                value={formData.client_name}
+                onChange={handleFormChange}
+                style={styles.input}
+                required
+              />
+              <input
+                type="text"
+                name="license_no"
+                placeholder="License No"
+                value={formData.license_no}
+                onChange={handleFormChange}
+                style={styles.input}
+                required
+              />
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Issue Date (Today)</label>
+                <input
+                  type="date"
+                  name="issue_date"
+                  value={today}
+                  style={{ ...styles.input, backgroundColor: '#eee' }}
+                  readOnly
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Duration (days)</label>
+                <input
+                  type="number"
+                  name="duration"
+                  placeholder="Enter duration in days"
+                  value={formData.duration}
+                  onChange={handleFormChange}
+                  style={styles.input}
+                  min="1"
+                  required
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Expiry Date (Auto-calculated)</label>
+                <input
+                  type="date"
+                  name="expiry_date"
+                  value={formData.expiry_date}
+                  style={{ ...styles.input, backgroundColor: '#eee' }}
+                  readOnly
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Status</label>
+                <select
+                  name="status"
+                  value={formData.status}
+                  onChange={handleFormChange}
+                  style={styles.select}
+                  required
+                >
+                  <option value="">Select Status</option>
+                  {STATUS_OPTIONS.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button type="submit" style={styles.submitButton}>
+                  {isEditMode ? 'Update' : 'Submit'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  style={{ ...styles.submitButton, backgroundColor: '#ccc' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default Clients
+const styles = {
+  page: {
+    display: 'flex',
+    height: '100vh',
+    backgroundColor: '#f0f4f8',
+    fontFamily: 'Arial, sans-serif',
+  },
+  leftPanel: {
+    width: '25%',
+    backgroundColor: '#ffffff',
+    padding: '20px',
+    boxShadow: '2px 0 5px rgba(0,0,0,0.1)',
+    overflowY: 'auto',
+  },
+  rightPanel: {
+    flex: 1,
+    padding: '40px',
+    backgroundColor: 'white',
+    overflowY: 'auto',
+  },
+  mainTitle: {
+    color: '#003366',
+    fontSize: '26px',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: '20px',
+    textTransform: 'uppercase',
+  },
+  subtitle: {
+    color: '#003366',
+    fontSize: '20px',
+    marginBottom: '20px',
+  },
+  clientItem: {
+    padding: '10px',
+    borderBottom: '1px solid #ccc',
+    cursor: 'pointer',
+    color: '#003366',
+  },
+  addButton: {
+    marginTop: '20px',
+    padding: '10px',
+    backgroundColor: '#003366',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    width: '100%',
+  },
+  editButton: {
+    padding: '10px 20px',
+    backgroundColor: '#003366',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.2s ease',
+    '&:hover': {
+      backgroundColor: '#004080',
+      transform: 'translateY(-1px)',
+    },
+  },
+  logoutButton: {
+    marginTop: '20px',
+    padding: '10px',
+    backgroundColor: '#cc0000',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    width: '100%',
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    maxWidth: '400px',
+  },
+  inputGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  label: {
+    fontSize: '14px',
+    color: '#666',
+    fontWeight: '500',
+  },
+  input: {
+    padding: '10px',
+    border: '1px solid #ccc',
+    borderRadius: '6px',
+    fontSize: '14px',
+    transition: 'border-color 0.2s ease',
+    '&:focus': {
+      borderColor: '#003366',
+      outline: 'none',
+    }
+  },
+  submitButton: {
+    padding: '10px',
+    backgroundColor: '#003366',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  detailsContainer: {
+    backgroundColor: '#ffffff',
+    padding: '30px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+    border: '1px solid #eaeaea',
+  },
+  detailsTitle: {
+    color: '#003366',
+    fontSize: '24px',
+    fontWeight: '600',
+    marginBottom: '25px',
+    borderBottom: '2px solid #003366',
+    paddingBottom: '10px',
+  },
+  detailsGrid: {
+    display: 'flex',
+    gap: '40px',
+    flexWrap: 'wrap',
+  },
+  detailColumn: {
+    flex: '1 1 250px',
+    minWidth: '250px',
+  },
+  detailItem: {
+    marginBottom: '20px',
+    padding: '10px',
+    backgroundColor: '#f8fafc',
+    borderRadius: '8px',
+    transition: 'all 0.2s ease',
+    '&:hover': {
+      backgroundColor: '#f1f5f9',
+    },
+  },
+  detailLabel: {
+    display: 'block',
+    fontWeight: '600',
+    color: '#64748b',
+    fontSize: '13px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    marginBottom: '4px',
+  },
+  detailValue: {
+    display: 'block',
+    color: '#1e293b',
+    fontSize: '15px',
+    fontWeight: '500',
+  },
+  detailAction: {
+    marginTop: '20px',
+    display: 'flex',
+    justifyContent: 'flex-start',
+  },
+  headerSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '15px',
+    marginBottom: '20px',
+  },
+  dashboardButton: {
+    padding: '8px 16px',
+    backgroundColor: '#1a4980',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'all 0.2s ease',
+    width: '100%',
+    '&:hover': {
+      backgroundColor: '#0a2540',
+    },
+  },
+  statusBadge: {
+    display: 'inline-block',
+    padding: '6px 12px',
+    borderRadius: '9999px',
+    color: 'white',
+    fontWeight: '500',
+    fontSize: '14px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  select: {
+    padding: '10px',
+    border: '1px solid #ccc',
+    borderRadius: '6px',
+    fontSize: '14px',
+    backgroundColor: 'white',
+    width: '100%',
+    transition: 'all 0.2s ease',
+    cursor: 'pointer',
+    '&:focus': {
+      borderColor: '#003366',
+      outline: 'none',
+      boxShadow: '0 0 0 2px rgba(0,51,102,0.2)',
+    }
+  },
+  '@keyframes pulse': {
+    '0%, 100%': {
+      opacity: 1,
+    },
+    '50%': {
+      opacity: 0.5,
+    }
+  },
+  '@keyframes bounce': {
+    '0%, 100%': {
+      transform: 'translateY(0)',
+    },
+    '50%': {
+      transform: 'translateY(-3px)',
+    }
+  },
+};
+
+export default Clients;

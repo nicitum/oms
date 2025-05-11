@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Loader2, LogOut, Settings, Key } from 'lucide-react';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -30,7 +31,7 @@ function Dashboard() {
 
   const handleLogout = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/logout', {
+      const response = await fetch('http://147.93.110.150:3001/api/logout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -59,7 +60,7 @@ function Dashboard() {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/change-password', {
+      const response = await fetch('http://147.93.110.150:3001/api/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

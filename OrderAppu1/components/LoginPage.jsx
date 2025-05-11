@@ -37,6 +37,29 @@ const LoginPage = ({ navigation }) => {
 
     setIsLoading(true);
     try {
+      // First check client status
+      const clientStatusResponse = await fetch(`http://147.93.110.150:3001/api/client_status/amar`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" }
+      });
+      
+      const clientStatusData = await clientStatusResponse.json();
+      console.log(clientStatusData.data);
+      
+      if (!clientStatusResponse.ok || !clientStatusData.success) {
+        throw new Error("Failed to verify client status");
+      }
+
+      if (!clientStatusData.data.length || clientStatusData.data[0].status !== "Active") {
+        Alert.alert(
+          "License Error",
+          "License status inactive. Please check with Owner",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
+      // Then proceed with authentication
       const response = await fetch(`http://${ipAddress}:8091/auth`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -47,6 +70,8 @@ const LoginPage = ({ navigation }) => {
       if (!response.ok) throw new Error(data.message || "Login failed");
 
       const decoded = jwtDecode(data.token);
+      
+      // If both checks pass, save tokens and navigate
       await AsyncStorage.multiSet([
         ["customerId", decoded.id],
         ["userAuthToken", data.token]

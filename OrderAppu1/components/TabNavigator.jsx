@@ -5,9 +5,10 @@ import HomeStack from "./HomePage/HomeStack";
 import ProfileStack from "./Profile/ProfileStack";
 import Transactions from "./Transactions/transactions";
 import IndentStack from "./IndentPage/IndentStack";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
+import { useNavigation } from "@react-navigation/native";
 
 import AdminOrderHistory from "./Profile/AdminOrderHistory";
 import AdminTransactions from "./Profile/AdminTransactions";
@@ -20,6 +21,40 @@ const TabNavigator = () => {
     const [isAdmin, setIsAdmin] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+    const navigation = useNavigation();
+
+    const checkClientStatus = async () => {
+        try {
+            const clientStatusResponse = await fetch(`http://147.93.110.150:3001/api/client_status/amar`, {
+                method: "GET",
+                headers: { "Content-Type": "application/json" }
+            });
+            
+            const clientStatusData = await clientStatusResponse.json();
+            
+            if (!clientStatusResponse.ok || !clientStatusData.success || 
+                !clientStatusData.data.length || clientStatusData.data[0].status !== "Active") {
+                // Remove the token and navigate to login
+                await AsyncStorage.removeItem("userAuthToken");
+                Alert.alert(
+                    "License Error",
+                    "License status inactive. Please check with Owner",
+                    [{ 
+                        text: "OK",
+                        onPress: () => navigation.replace("Login")
+                    }]
+                );
+                return false;
+            }
+            return true;
+        } catch (error) {
+            console.error("Error checking client status:", error);
+            // On error, logout for safety
+            await AsyncStorage.removeItem("userAuthToken");
+            navigation.replace("Login");
+            return false;
+        }
+    };
 
     useEffect(() => {
         const checkUserRole = async () => {
@@ -29,6 +64,10 @@ const TabNavigator = () => {
             if (userAuthToken) {
                 try {
                     const decodedToken = jwtDecode(userAuthToken);
+                    // Check client status first
+                    const isActive = await checkClientStatus();
+                    if (!isActive) return;
+
                     if (decodedToken.role === "admin") {
                         setIsAdmin(true);
                         setIsSuperAdmin(false);
@@ -53,6 +92,15 @@ const TabNavigator = () => {
         checkUserRole();
     }, []);
 
+    // Add tab change listener
+    const handleTabPress = async () => {
+        const isActive = await checkClientStatus();
+        if (!isActive) {
+            return false; // Prevent tab change if status is not active
+        }
+        return true;
+    };
+
     if (isLoading) {
         return (
             <View style={styles.loadingContainer}>
@@ -69,6 +117,19 @@ const TabNavigator = () => {
                 tabBarInactiveTintColor: "#8A939C", // Softer gray for inactive
                 tabBarStyle: styles.tabBar, // Custom tab bar style
                 tabBarLabelStyle: styles.tabLabel, // Custom label style
+            }}
+            screenListeners={{
+                tabPress: (e) => {
+                    // Prevent default action
+                    e.preventDefault();
+                    // Check status before allowing tab change
+                    handleTabPress().then(canProceed => {
+                        if (canProceed) {
+                            // Manually navigate if status is active
+                            navigation.navigate(e.target.split("-")[0]);
+                        }
+                    });
+                },
             }}
         >
            <Tab.Screen

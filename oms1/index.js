@@ -6,30 +6,29 @@ const orderRouter = require("./routes/order");
 const adminRouter = require("./routes/admin");
 const generalRouter = require("./routes/generalRoutes");
 const worldline = require("./routes/worldline");
-
-
-const adminAssignRoutes = require("./routes/adminassign"); // Import the new route
+const adminAssignRoutes = require("./routes/adminassign");
 const action = require("./routes/action");
-const bodyParser = require('body-parser'); // **Import body-parser**
+const bodyParser = require('body-parser');
 
 const app = express();
 
+// Configure CORS before other middleware
+app.use(cors({
+    origin: '*', // Allow all origins in development
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
+
 app.use(session({
-    secret: 'APPU123', // Replace with a strong, random secret key
+    secret: 'APPU123',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true } // Adjust cookie settings for production
-  }));
+    cookie: { secure: false, httpOnly: true }
+}));
 
-
-// **ADD body-parser middleware setup HERE, BEFORE app.use(cors()) and other routes:**
-app.use(bodyParser.urlencoded({ extended: false })); //  For parsing application/x-www-form-urlencoded
-app.use(bodyParser.json());         // For parsing application/json
-
-
-app.use(cors()); // Enable CORS -  Keep CORS setup AFTER body-parser
-
-app.use(express.json()); //  You already have this line - you can REMOVE it, as bodyParser.json() does the same and is more standard for body parsing
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
 app.get("/", (req, res) => {
     res.send("Homepage");
@@ -40,10 +39,7 @@ app.use("/", orderRouter);
 app.use("/", adminRouter);
 app.use("/", generalRouter);
 app.use("/",adminAssignRoutes);
-
-
 app.use("/",action);
-
 app.use("/",worldline);
 
 app.get("/s", (req, res) => {

@@ -27,6 +27,20 @@ const loginUser = async (username, password) => {
       };
     }
 
+    // Check client status
+    const clientStatusQuery = `SELECT status FROM clients WHERE client_name LIKE ?`;
+    const clientStatus = await executeQuery(clientStatusQuery, [`%${user.client_name}%`]);
+    
+    if (!clientStatus || clientStatus.length === 0 || clientStatus[0].status !== 'Active') {
+      return {
+        statusCode: 403,
+        response: {
+          status: false,
+          message: "Client account is inactive. Please contact administrator.",
+        },
+      };
+    }
+
     if (user && user.status !== "Active") {
       return {
         statusCode: 400,
